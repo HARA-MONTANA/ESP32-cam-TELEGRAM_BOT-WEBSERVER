@@ -21,6 +21,9 @@ public:
     String findPhotoInFolder(String folder, int year, int month, int day);  // Busca foto por fecha en carpeta específica
     String listPhotos(int page = 1, int perPage = 10, int* totalPages = nullptr);  // Lista fotos de carpeta principal
     String listPhotosInFolder(String folder, int page = 1, int perPage = 10, int* totalPages = nullptr);  // Lista fotos de carpeta específica
+    String listAllPhotosTree(int page = 1, int perPage = 10, int* totalPages = nullptr);  // Lista fotos de TODAS las carpetas
+    String getPhotoPathByIndex(int index);  // Obtiene ruta completa por índice global
+    int countAllPhotos();  // Cuenta total de fotos en todas las carpetas
 
     // Configuración de carpeta
     void setPhotosFolder(String folderName);

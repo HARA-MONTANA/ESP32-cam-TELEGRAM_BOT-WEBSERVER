@@ -24,6 +24,7 @@ public:
     void init();
     void handleMessages();
     bool sendPhoto(const uint8_t* imageData, size_t imageSize, String caption = "");
+    bool sendPhotoToChat(const uint8_t* imageData, size_t imageSize, String chatId, String caption = "");
     bool sendMessage(String message);
     bool sendDailyPhoto();                        // Envía la foto diaria guardada en SD
     bool takeDailyPhoto(bool sendToTelegram);     // Toma foto, guarda en SD, envía a Telegram si se indica

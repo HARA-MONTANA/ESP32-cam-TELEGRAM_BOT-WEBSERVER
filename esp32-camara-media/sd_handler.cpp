@@ -43,6 +43,9 @@ bool SDHandler::init() {
     // Crear directorio principal
     createDirectory("/" + photosFolder);
 
+    // Crear directorio para fotos de Telegram
+    createDirectory("/" + String(TELEGRAM_PHOTOS_FOLDER));
+
     initialized = true;
     Serial.println("Tarjeta SD inicializada correctamente");
     Serial.printf("Carpeta de fotos: /%s\n", photosFolder.c_str());
@@ -304,6 +307,10 @@ bool SDHandler::photoExistsToday() {
 }
 
 String SDHandler::findPhotoByDate(int year, int month, int day) {
+    return findPhotoInFolder(photosFolder, year, month, day);
+}
+
+String SDHandler::findPhotoInFolder(String folder, int year, int month, int day) {
     if (!initialized) {
         return "";
     }
@@ -312,7 +319,7 @@ String SDHandler::findPhotoByDate(int year, int month, int day) {
     char datePrefix[16];
     snprintf(datePrefix, sizeof(datePrefix), "%04d-%02d-%02d", year, month, day);
 
-    String folderPath = "/" + photosFolder;
+    String folderPath = "/" + folder;
     File dir = SD_MMC.open(folderPath);
     if (!dir || !dir.isDirectory()) {
         return "";
@@ -334,12 +341,16 @@ String SDHandler::findPhotoByDate(int year, int month, int day) {
 }
 
 String SDHandler::listPhotos(int page, int perPage, int* totalPages) {
+    return listPhotosInFolder(photosFolder, page, perPage, totalPages);
+}
+
+String SDHandler::listPhotosInFolder(String folder, int page, int perPage, int* totalPages) {
     if (!initialized) {
         if (totalPages) *totalPages = 0;
         return "";
     }
 
-    String folderPath = "/" + photosFolder;
+    String folderPath = "/" + folder;
     File dir = SD_MMC.open(folderPath);
     if (!dir || !dir.isDirectory()) {
         if (totalPages) *totalPages = 0;

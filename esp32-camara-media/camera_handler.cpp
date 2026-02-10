@@ -206,7 +206,8 @@ void CameraHandler::setFrameSize(framesize_t size) {
 
 void CameraHandler::setFlash(bool enable) {
     settings.flashEnabled = enable;
-    digitalWrite(FLASH_GPIO_NUM, enable ? HIGH : LOW);
+    // Flash LED solo se enciende durante capturePhoto() o streaming
+    // No se deja encendido permanentemente
 }
 
 CameraSettings CameraHandler::getSettings() {

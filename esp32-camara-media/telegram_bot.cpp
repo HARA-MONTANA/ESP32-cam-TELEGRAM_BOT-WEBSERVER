@@ -120,7 +120,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
     if (command == "/start" || command == "/ayuda" || command == "/help") {
         sendHelpMessage(chatId);
     }
-    else if (command.startsWith("/foto") || command.startsWith("/photo") || command == "/captura") {
+    else if ((command.startsWith("/foto") && !command.startsWith("/fotodiaria")) || command.startsWith("/photo") || command == "/captura") {
         // Verificar si tiene argumentos de fecha
         String args = "";
         int spaceIndex = command.indexOf(' ');
@@ -152,11 +152,14 @@ void TelegramBot::handleCommand(String command, String chatId) {
 
             // Validar fecha
             if (year >= 2020 && year <= 2099 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-                // Buscar foto de esa fecha
+                // Buscar foto de esa fecha (primero en telegram_fotos, luego en fotos diarias)
                 if (!sdCard.isInitialized()) {
                     bot->sendMessage(chatId, "SD Card no disponible", "");
                 } else {
-                    String photoPath = sdCard.findPhotoByDate(year, month, day);
+                    String photoPath = sdCard.findPhotoInFolder(TELEGRAM_PHOTOS_FOLDER, year, month, day);
+                    if (photoPath.isEmpty()) {
+                        photoPath = sdCard.findPhotoByDate(year, month, day);
+                    }
                     if (photoPath.isEmpty()) {
                         char dateStr[16];
                         snprintf(dateStr, sizeof(dateStr), "%04d-%02d-%02d", year, month, day);
@@ -184,7 +187,27 @@ void TelegramBot::handleCommand(String command, String chatId) {
 
             camera_fb_t* fb = camera.capturePhoto();
             if (fb) {
-                // Solo enviar por Telegram (no guardar en SD)
+                // Guardar en SD en carpeta telegram_fotos
+                if (sdCard.isInitialized()) {
+                    struct tm timeinfo;
+                    String filename;
+                    if (getLocalTime(&timeinfo)) {
+                        char buf[80];
+                        snprintf(buf, sizeof(buf), "/%s/%04d-%02d-%02d_%02d-%02d-%02d.jpg",
+                                 TELEGRAM_PHOTOS_FOLDER,
+                                 timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                                 timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+                        filename = String(buf);
+                    } else {
+                        filename = "/" + String(TELEGRAM_PHOTOS_FOLDER) + "/foto_" + String(millis()) + ".jpg";
+                    }
+                    if (!SD_MMC.exists("/" + String(TELEGRAM_PHOTOS_FOLDER))) {
+                        SD_MMC.mkdir("/" + String(TELEGRAM_PHOTOS_FOLDER));
+                    }
+                    sdCard.savePhoto(fb->buf, fb->len, filename);
+                }
+
+                // Enviar por Telegram
                 sendPhoto(fb->buf, fb->len, "Foto capturada");
                 camera.releaseFrame(fb);
             } else {
@@ -195,7 +218,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
     else if (command == "/estado" || command == "/status") {
         sendStatusMessage(chatId);
     }
-    // Comando /flash on/off (sin toggle)
+    // Comando /flash: toggle unico que afecta fotos y foto diaria
     else if (command.startsWith("/flash")) {
         String args = "";
         int spaceIndex = command.indexOf(' ');
@@ -204,17 +227,27 @@ void TelegramBot::handleCommand(String command, String chatId) {
             args.trim();
         }
 
+        bool newFlash;
         if (args == "on") {
-            camera.setFlash(true);
-            bot->sendMessage(chatId, "Flash ACTIVADO", "");
+            newFlash = true;
+        } else if (args == "off") {
+            newFlash = false;
+        } else {
+            // Toggle
+            CameraSettings currentSettings = camera.getSettings();
+            newFlash = !currentSettings.flashEnabled;
         }
-        else if (args == "off") {
-            camera.setFlash(false);
-            bot->sendMessage(chatId, "Flash DESACTIVADO", "");
-        }
-        else {
-            bot->sendMessage(chatId, "Uso: /flash on o /flash off", "");
-        }
+
+        camera.setFlash(newFlash);
+        camera.saveSettings();
+
+        // Sincronizar con foto diaria
+        dailyConfig.useFlash = newFlash;
+        saveDailyPhotoConfig();
+
+        String msg = "Flash: " + String(newFlash ? "ACTIVADO" : "DESACTIVADO") + "\n";
+        msg += "(Aplica a fotos y foto diaria)";
+        bot->sendMessage(chatId, msg, "");
     }
     // Comando para ver configuración de foto diaria
     else if (command == "/config" || command == "/configuracion") {
@@ -261,25 +294,6 @@ void TelegramBot::handleCommand(String command, String chatId) {
             bot->sendMessage(chatId, "Uso: /hora HH:MM\nEjemplo: /hora 11:30", "");
         }
     }
-    // Comando para activar flash en foto diaria
-    else if (command == "/flashdiario" || command == "/dailyflash") {
-        dailyConfig.useFlash = !dailyConfig.useFlash;
-        saveDailyPhotoConfig();
-
-        String msg = "Flash para foto diaria: ";
-        msg += dailyConfig.useFlash ? "ACTIVADO" : "DESACTIVADO";
-        bot->sendMessage(chatId, msg, "");
-    }
-    else if (command == "/flashdiarion" || command == "/dailyflashon") {
-        dailyConfig.useFlash = true;
-        saveDailyPhotoConfig();
-        bot->sendMessage(chatId, "Flash para foto diaria: ACTIVADO", "");
-    }
-    else if (command == "/flashdiarioff" || command == "/dailyflashoff") {
-        dailyConfig.useFlash = false;
-        saveDailyPhotoConfig();
-        bot->sendMessage(chatId, "Flash para foto diaria: DESACTIVADO", "");
-    }
     // Comando /fotodiaria con argumentos
     else if (command.startsWith("/fotodiaria")) {
         // Parsear argumentos
@@ -314,30 +328,37 @@ void TelegramBot::handleCommand(String command, String chatId) {
             bot->sendMessage(chatId, "Uso: /fotodiaria [on|off]\n- Sin argumento: envia foto guardada en SD\n- on: activa envio automatico\n- off: desactiva envio automatico", "");
         }
     }
-    // Comando /carpeta para cambiar nombre de carpeta de fotos
+    // Comando /carpeta para listar fotos guardadas
     else if (command.startsWith("/carpeta") || command.startsWith("/folder")) {
-        String args = "";
-        int spaceIndex = originalCommand.indexOf(' ');
-        if (spaceIndex > 0) {
-            args = originalCommand.substring(spaceIndex + 1);
-            args.trim();
-        }
+        if (!sdCard.isInitialized()) {
+            bot->sendMessage(chatId, "SD Card no disponible", "");
+        } else {
+            // Parsear numero de pagina
+            int page = 1;
+            String args = "";
+            int spaceIndex = command.indexOf(' ');
+            if (spaceIndex > 0) {
+                args = command.substring(spaceIndex + 1);
+                args.trim();
+                int parsed = args.toInt();
+                if (parsed > 0) page = parsed;
+            }
 
-        if (args == "") {
-            // Sin argumentos: mostrar carpeta actual
-            String msg = "Carpeta de fotos: /" + sdCard.getPhotosFolder() + "/\n\n";
-            msg += "Formato: YYYY-MM-DD_HH-MM.jpg\n";
-            msg += "Ejemplo: 2024-01-15_11-30.jpg\n\n";
-            msg += "Para cambiar: /carpeta nombre";
-            bot->sendMessage(chatId, msg, "");
-        }
-        else {
-            // Cambiar nombre de carpeta
-            sdCard.setPhotosFolder(args);
-            sdCard.saveConfig();
-            String msg = "Carpeta de fotos cambiada a: /" + sdCard.getPhotosFolder() + "\n";
-            msg += "Las nuevas fotos se guardaran ahi.";
-            bot->sendMessage(chatId, msg, "");
+            int totalPages = 0;
+            String list = sdCard.listPhotosInFolder(TELEGRAM_PHOTOS_FOLDER, page, 10, &totalPages);
+
+            if (list.isEmpty()) {
+                bot->sendMessage(chatId, "No hay fotos en /" + String(TELEGRAM_PHOTOS_FOLDER), "");
+            } else {
+                String msg = "Fotos en /" + String(TELEGRAM_PHOTOS_FOLDER) + ":\n\n";
+                msg += list;
+                msg += "\nPagina " + String(page) + "/" + String(totalPages);
+                if (totalPages > 1) {
+                    msg += "\nUsa /carpeta N para ver otra pagina";
+                }
+                msg += "\n\nPara enviar: /foto DD/MM/YYYY";
+                bot->sendMessage(chatId, msg, "");
+            }
         }
     }
     else if (command == "/stream") {
@@ -420,21 +441,18 @@ void TelegramBot::sendHelpMessage(String chatId) {
     String helpMsg = "Comandos disponibles:\n\n";
     helpMsg += "FOTOS:\n";
     helpMsg += "/foto - Capturar y enviar foto\n";
-    helpMsg += "/foto DD/MM/YYYY - Enviar foto de fecha\n\n";
+    helpMsg += "/foto DD/MM/YYYY - Enviar foto de fecha\n";
+    helpMsg += "/carpeta - Ver fotos guardadas\n\n";
 
     helpMsg += "FLASH:\n";
-    helpMsg += "/flash on - Activar flash\n";
-    helpMsg += "/flash off - Desactivar flash\n\n";
+    helpMsg += "/flash - Activar/desactivar flash\n";
+    helpMsg += "(Aplica a fotos y foto diaria)\n\n";
 
     helpMsg += "FOTO DIARIA:\n";
     helpMsg += "/fotodiaria - Enviar foto del dia guardada\n";
     helpMsg += "/fotodiaria on/off - Activar/desactivar envio\n";
     helpMsg += "/config - Ver configuracion actual\n";
-    helpMsg += "/hora HH:MM - Cambiar hora\n";
-    helpMsg += "/flashdiario - Toggle flash diario\n\n";
-
-    helpMsg += "SD CARD:\n";
-    helpMsg += "/carpeta - Ver/cambiar carpeta\n\n";
+    helpMsg += "/hora HH:MM - Cambiar hora\n\n";
 
     helpMsg += "USUARIOS:\n";
     helpMsg += "/users - Ver autorizados\n";
@@ -487,8 +505,7 @@ void TelegramBot::sendStatusMessage(String chatId) {
     status += "\nFoto Diaria (a las " + String(dailyConfig.hour) + ":" +
               (dailyConfig.minute < 10 ? "0" : "") + String(dailyConfig.minute) + "):\n";
     status += "Envio Telegram: " + String(dailyConfig.enabled ? "ON" : "OFF") + "\n";
-    status += "Guardar SD: SIEMPRE\n";
-    status += "Flash: " + String(dailyConfig.useFlash ? "ON" : "OFF");
+    status += "Guardar SD: SIEMPRE";
 
     bot->sendMessage(chatId, status, "");
 }
@@ -513,7 +530,7 @@ void TelegramBot::sendDailyConfigMessage(String chatId) {
     msg += "/fotodiaria - Ver foto guardada\n";
     msg += "/fotodiaria on/off - Envio automatico\n";
     msg += "/hora HH:MM - Cambiar hora\n";
-    msg += "/flashdiario - Activar/desactivar flash";
+    msg += "/flash - Activar/desactivar flash";
 
     bot->sendMessage(chatId, msg, "");
 }
@@ -599,21 +616,8 @@ bool TelegramBot::sendMessage(String message) {
 }
 
 bool TelegramBot::takeDailyPhoto(bool sendToTelegram) {
-    // Guardar estado actual del flash
-    CameraSettings currentSettings = camera.getSettings();
-    bool previousFlashState = currentSettings.flashEnabled;
-
-    // Configurar flash según configuración de foto diaria
-    if (dailyConfig.useFlash != previousFlashState) {
-        camera.setFlash(dailyConfig.useFlash);
-    }
-
+    // Flash se maneja en capturePhoto() segun settings.flashEnabled
     camera_fb_t* fb = camera.capturePhoto();
-
-    // Restaurar estado anterior del flash
-    if (dailyConfig.useFlash != previousFlashState) {
-        camera.setFlash(previousFlashState);
-    }
 
     if (!fb) {
         if (sendToTelegram) {
@@ -643,7 +647,7 @@ bool TelegramBot::takeDailyPhoto(bool sendToTelegram) {
             char buffer[32];
             strftime(buffer, sizeof(buffer), "%d/%m/%Y %H:%M", &timeinfo);
             dateStr = "Foto del dia: " + String(buffer);
-            if (dailyConfig.useFlash) {
+            if (camera.getSettings().flashEnabled) {
                 dateStr += " (con flash)";
             }
         }

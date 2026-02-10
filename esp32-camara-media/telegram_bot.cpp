@@ -467,7 +467,9 @@ void TelegramBot::sendStatusMessage(String chatId) {
 
     // SD Card
     if (sdCard.isInitialized()) {
-        status += "SD: " + String(sdCard.getFreeSpace() / (1024 * 1024)) + " MB libres\n";
+        float sdFreeGB = sdCard.getFreeSpace() / (1024.0 * 1024.0 * 1024.0);
+        float sdTotalGB = sdCard.getTotalSpace() / (1024.0 * 1024.0 * 1024.0);
+        status += "SD: " + String(sdFreeGB, 1) + "/" + String(sdTotalGB, 1) + " GB Libres\n";
         status += "Carpeta: /" + sdCard.getPhotosFolder() + "\n";
     } else {
         status += "SD: No disponible\n";

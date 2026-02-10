@@ -34,8 +34,8 @@ bool SDHandler::init() {
         Serial.println("DESCONOCIDO");
     }
 
-    uint64_t cardSize = SD_MMC.cardSize() / (1024 * 1024);
-    Serial.printf("Tamaño de tarjeta SD: %lluMB\n", cardSize);
+    uint64_t cardSizeMB = SD_MMC.cardSize() / (1024 * 1024);
+    Serial.printf("Tamaño de tarjeta SD: %.2f GB\n", cardSizeMB / 1024.0);
 
     // Cargar configuración guardada
     loadConfig();

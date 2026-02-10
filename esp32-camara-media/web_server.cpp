@@ -1025,6 +1025,17 @@ String CameraWebServer::generateDashboardHTML() {
             }
         }
 
+        function formatPhotoDate(name) {
+            var d = name;
+            if (d.startsWith('web_')) d = d.substring(4);
+            if (d.length >= 16) {
+                var s = d.substring(8,10)+'/'+d.substring(5,7)+'/'+d.substring(0,4)+' '+d.substring(11,13)+':'+d.substring(14,16);
+                if (d.length >= 19 && d.charAt(16) === '-') s += ':'+d.substring(17,19);
+                return s;
+            }
+            return name;
+        }
+
         async function loadPhotos() {
             try {
                 const response = await fetch('/photos');
@@ -1043,7 +1054,7 @@ String CameraWebServer::generateDashboardHTML() {
                 photos.forEach(photo => {
                     const sizeKB = Math.round(photo.size / 1024);
                     html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 5px;border-bottom:1px solid rgba(0,255,255,0.1);">';
-                    html += '<span style="color:#0ff;font-size:0.85em;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + photo.name + ' <span style="color:#888;">(' + sizeKB + 'KB)</span></span>';
+                    html += '<span style="color:#0ff;font-size:0.85em;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + formatPhotoDate(photo.name) + ' <span style="color:#888;">(' + sizeKB + 'KB)</span></span>';
                     html += '<div style="display:flex;gap:5px;flex-shrink:0;margin-left:10px;">';
                     html += '<button onclick="viewPhoto(\'' + photo.name + '\')" style="padding:5px 10px;background:linear-gradient(135deg,#00f0ff,#0099aa);color:#000;border:none;border-radius:5px;cursor:pointer;font-size:0.8em;font-weight:600;">Ver</button>';
                     html += '<button onclick="downloadPhoto(\'' + photo.name + '\')" style="padding:5px 10px;background:linear-gradient(135deg,#e0ff00,#aacc00);color:#000;border:none;border-radius:5px;cursor:pointer;font-size:0.8em;font-weight:600;">Descargar</button>';
@@ -1074,7 +1085,7 @@ String CameraWebServer::generateDashboardHTML() {
             const nameEl = document.getElementById('viewerName');
             const counterEl = document.getElementById('viewerCounter');
             img.src = '/photo?name=' + encodeURIComponent(photo.name);
-            nameEl.textContent = photo.name;
+            nameEl.textContent = formatPhotoDate(photo.name);
             counterEl.textContent = (index + 1) + ' / ' + photoList.length;
             document.getElementById('prevBtn').disabled = (index === 0);
             document.getElementById('nextBtn').disabled = (index === photoList.length - 1);

@@ -1,0 +1,38 @@
+#ifndef WEB_SERVER_H
+#define WEB_SERVER_H
+
+#include <Arduino.h>
+#include <WebServer.h>
+#include <ArduinoJson.h>
+
+class CameraWebServer {
+public:
+    CameraWebServer(int port = 80);
+
+    void init();
+    void handleClient();
+
+private:
+    WebServer server;
+
+    // Handlers de rutas
+    void handleRoot();
+    void handleStream();
+    void handleCapture();
+    void handleSettings();
+    void handleGetSettings();
+    void handleUpdateSettings();
+    void handleStatus();
+    void handleWebCapture();
+    void handleListPhotos();
+    void handleViewPhoto();
+    void handleDeletePhoto();
+    void handleNotFound();
+
+    // Generar HTML del dashboard
+    String generateDashboardHTML();
+};
+
+extern CameraWebServer webServer;
+
+#endif // WEB_SERVER_H

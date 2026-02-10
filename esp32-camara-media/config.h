@@ -54,7 +54,7 @@
 // CONFIGURACIÓN DE SD CARD
 // ============================================
 #define SD_MMC_1BIT_MODE true  // Usar modo 1-bit para liberar el flash LED
-#define DEFAULT_PHOTOS_FOLDER "fotos"  // Nombre de carpeta raíz para fotos diarias
+#define DEFAULT_PHOTOS_FOLDER "fotos_diarias"  // Nombre de carpeta raíz para fotos diarias
 #define TELEGRAM_PHOTOS_FOLDER "telegram_fotos"  // Carpeta para fotos tomadas por Telegram
 
 // ============================================

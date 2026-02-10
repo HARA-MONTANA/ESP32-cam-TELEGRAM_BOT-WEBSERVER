@@ -1,10 +1,8 @@
 #include "sd_handler.h"
 #include "config.h"
 #include <time.h>
-#include <Preferences.h>
 
 SDHandler sdCard;
-static Preferences sdPrefs;
 
 SDHandler::SDHandler() : initialized(false), photosFolder(DEFAULT_PHOTOS_FOLDER) {}
 
@@ -36,9 +34,6 @@ bool SDHandler::init() {
 
     uint64_t cardSizeMB = SD_MMC.cardSize() / (1024 * 1024);
     Serial.printf("Tamaño de tarjeta SD: %.2f GB\n", cardSizeMB / 1024.0);
-
-    // Cargar configuración guardada
-    loadConfig();
 
     // Crear directorio principal
     createDirectory("/" + photosFolder);
@@ -461,27 +456,92 @@ static String formatPhotoEntry(String fullPath, int num) {
     int lastSlash = fullPath.lastIndexOf('/');
     String name = (lastSlash >= 0) ? fullPath.substring(lastSlash + 1) : fullPath;
 
-    // Extraer carpeta
-    String folder = "";
-    if (lastSlash > 0) {
-        int prevSlash = fullPath.lastIndexOf('/', lastSlash - 1);
-        folder = fullPath.substring(prevSlash + 1, lastSlash);
+    // Manejar prefijo web_
+    String suffix = "";
+    String datePart = name;
+    if (name.startsWith("web_")) {
+        suffix = " (web)";
+        datePart = name.substring(4);
     }
 
     // Parsear fecha: YYYY-MM-DD_HH-MM-SS.jpg o YYYY-MM-DD_HH-MM.jpg
-    if (name.length() >= 16) {
-        String year = name.substring(0, 4);
-        String month = name.substring(5, 7);
-        String day = name.substring(8, 10);
-        String hour = name.substring(11, 13);
-        String minute = name.substring(14, 16);
+    if (datePart.length() >= 16) {
+        String year = datePart.substring(0, 4);
+        String month = datePart.substring(5, 7);
+        String day = datePart.substring(8, 10);
+        String hour = datePart.substring(11, 13);
+        String minute = datePart.substring(14, 16);
         String second = "";
-        if (name.length() >= 19 && name.charAt(16) == '-') {
-            second = ":" + name.substring(17, 19);
+        if (datePart.length() >= 19 && datePart.charAt(16) == '-') {
+            second = ":" + datePart.substring(17, 19);
         }
-        return String(num) + ". " + day + "/" + month + "/" + year + " " + hour + ":" + minute + second;
+        return String(num) + ". " + day + "/" + month + "/" + year + " " + hour + ":" + minute + second + suffix;
     }
     return String(num) + ". " + name;
+}
+
+// Estructura para info de carpeta (uso interno)
+struct FolderInfo {
+    String name;
+    int startIndex;
+    int count;
+};
+
+#define MAX_SD_FOLDERS 10
+#define MAX_TOTAL_PHOTOS 100
+
+// Recolecta todas las fotos de todas las carpetas en la SD
+static int collectAllPhotosFromSD(String* allPhotos, FolderInfo* folders, int* folderCount) {
+    *folderCount = 0;
+    int totalPhotos = 0;
+
+    // Recolectar nombres de directorios
+    String dirNames[MAX_SD_FOLDERS];
+    int dirCount = 0;
+
+    File root = SD_MMC.open("/");
+    if (!root || !root.isDirectory()) return 0;
+
+    File entry = root.openNextFile();
+    while (entry && dirCount < MAX_SD_FOLDERS) {
+        if (entry.isDirectory()) {
+            String name = String(entry.name());
+            if (name.startsWith("/")) name = name.substring(1);
+            if (!name.isEmpty() && !name.startsWith(".") && name != "System Volume Information") {
+                dirNames[dirCount] = name;
+                dirCount++;
+            }
+        }
+        entry = root.openNextFile();
+    }
+    root.close();
+
+    // Ordenar directorios alfabéticamente
+    for (int i = 0; i < dirCount - 1; i++) {
+        for (int j = i + 1; j < dirCount; j++) {
+            if (dirNames[j] < dirNames[i]) {
+                String temp = dirNames[i];
+                dirNames[i] = dirNames[j];
+                dirNames[j] = temp;
+            }
+        }
+    }
+
+    // Recolectar fotos de cada directorio
+    for (int d = 0; d < dirCount && totalPhotos < MAX_TOTAL_PHOTOS; d++) {
+        int maxForThis = MAX_TOTAL_PHOTOS - totalPhotos;
+        int collected = collectPhotosFromFolder("/" + dirNames[d], allPhotos + totalPhotos, maxForThis);
+
+        if (collected > 0) {
+            folders[*folderCount].name = dirNames[d];
+            folders[*folderCount].startIndex = totalPhotos;
+            folders[*folderCount].count = collected;
+            (*folderCount)++;
+            totalPhotos += collected;
+        }
+    }
+
+    return totalPhotos;
 }
 
 String SDHandler::listAllPhotosTree(int page, int perPage, int* totalPages) {
@@ -490,14 +550,13 @@ String SDHandler::listAllPhotosTree(int page, int perPage, int* totalPages) {
         return "";
     }
 
-    // Recolectar fotos de ambas carpetas (max 50 cada una)
-    String telegramPhotos[50];
-    String dailyPhotos[50];
+    // Recolectar fotos de todas las carpetas de la SD
+    String allPhotos[MAX_TOTAL_PHOTOS];
+    FolderInfo folders[MAX_SD_FOLDERS];
+    int folderCount = 0;
 
-    int telegramCount = collectPhotosFromFolder("/" + String(TELEGRAM_PHOTOS_FOLDER), telegramPhotos, 50);
-    int dailyCount = collectPhotosFromFolder("/" + photosFolder, dailyPhotos, 50);
+    int totalPhotos = collectAllPhotosFromSD(allPhotos, folders, &folderCount);
 
-    int totalPhotos = telegramCount + dailyCount;
     if (totalPhotos == 0) {
         if (totalPages) *totalPages = 0;
         return "";
@@ -514,42 +573,23 @@ String SDHandler::listAllPhotosTree(int page, int perPage, int* totalPages) {
     if (endIndex > totalPhotos) endIndex = totalPhotos;
 
     String result = "";
-    int globalIndex = 0;
-    bool headerAdded;
 
-    // Sección telegram_fotos
-    if (telegramCount > 0) {
-        headerAdded = false;
-        for (int i = 0; i < telegramCount; i++) {
-            globalIndex++;  // 1-indexed
-            if (globalIndex > endIndex) break;
-            if (globalIndex >= startIndex + 1) {
-                if (!headerAdded) {
-                    result += "/" + String(TELEGRAM_PHOTOS_FOLDER) + " (" + String(telegramCount) + " fotos):\n";
-                    headerAdded = true;
-                }
-                result += formatPhotoEntry(telegramPhotos[i], globalIndex) + "\n";
+    for (int f = 0; f < folderCount; f++) {
+        int folderStart = folders[f].startIndex;
+        int folderEnd = folderStart + folders[f].count;
+
+        // Saltar carpetas fuera del rango de la página actual
+        if (folderEnd <= startIndex || folderStart >= endIndex) continue;
+
+        // Encabezado de carpeta
+        result += "/" + folders[f].name + " (" + String(folders[f].count) + " fotos):\n";
+
+        for (int i = folderStart; i < folderEnd; i++) {
+            if (i >= startIndex && i < endIndex) {
+                result += formatPhotoEntry(allPhotos[i], i + 1) + "\n";  // 1-indexed
             }
         }
-        if (headerAdded && dailyCount > 0 && globalIndex < endIndex) {
-            result += "\n";
-        }
-    }
-
-    // Sección fotos diarias
-    if (dailyCount > 0 && globalIndex < endIndex) {
-        headerAdded = false;
-        for (int i = 0; i < dailyCount; i++) {
-            globalIndex++;
-            if (globalIndex > endIndex) break;
-            if (globalIndex >= startIndex + 1) {
-                if (!headerAdded) {
-                    result += "/" + photosFolder + " (" + String(dailyCount) + " fotos):\n";
-                    headerAdded = true;
-                }
-                result += formatPhotoEntry(dailyPhotos[i], globalIndex) + "\n";
-            }
-        }
+        result += "\n";
     }
 
     return result;
@@ -558,22 +598,15 @@ String SDHandler::listAllPhotosTree(int page, int perPage, int* totalPages) {
 String SDHandler::getPhotoPathByIndex(int index) {
     if (!initialized || index < 1) return "";
 
-    // Recolectar fotos en el mismo orden que listAllPhotosTree
-    String telegramPhotos[50];
-    String dailyPhotos[50];
+    // Recolectar fotos de todas las carpetas (mismo orden que listAllPhotosTree)
+    String allPhotos[MAX_TOTAL_PHOTOS];
+    FolderInfo folders[MAX_SD_FOLDERS];
+    int folderCount = 0;
 
-    int telegramCount = collectPhotosFromFolder("/" + String(TELEGRAM_PHOTOS_FOLDER), telegramPhotos, 50);
-    int dailyCount = collectPhotosFromFolder("/" + photosFolder, dailyPhotos, 50);
+    int totalPhotos = collectAllPhotosFromSD(allPhotos, folders, &folderCount);
 
-    // El índice es 1-based: primero telegram_fotos, luego fotos diarias
-    if (index <= telegramCount) {
-        return telegramPhotos[index - 1];
-    }
-    int dailyIndex = index - telegramCount;
-    if (dailyIndex >= 1 && dailyIndex <= dailyCount) {
-        return dailyPhotos[dailyIndex - 1];
-    }
-    return "";
+    if (index > totalPhotos) return "";
+    return allPhotos[index - 1];  // Convertir 1-indexed a 0-indexed
 }
 
 int SDHandler::countAllPhotos() {
@@ -581,78 +614,39 @@ int SDHandler::countAllPhotos() {
 
     int count = 0;
 
-    // Contar en telegram_fotos
-    File dir1 = SD_MMC.open("/" + String(TELEGRAM_PHOTOS_FOLDER));
-    if (dir1 && dir1.isDirectory()) {
-        File f = dir1.openNextFile();
-        while (f) {
-            if (!f.isDirectory()) {
-                String name = String(f.name());
-                if (name.endsWith(".jpg") || name.endsWith(".JPG")) count++;
-            }
-            f = dir1.openNextFile();
-        }
-        dir1.close();
-    }
+    // Contar fotos en todas las carpetas de la SD
+    File root = SD_MMC.open("/");
+    if (!root || !root.isDirectory()) return 0;
 
-    // Contar en fotos diarias
-    File dir2 = SD_MMC.open("/" + photosFolder);
-    if (dir2 && dir2.isDirectory()) {
-        File f = dir2.openNextFile();
-        while (f) {
-            if (!f.isDirectory()) {
-                String name = String(f.name());
-                if (name.endsWith(".jpg") || name.endsWith(".JPG")) count++;
+    File dirEntry = root.openNextFile();
+    while (dirEntry) {
+        if (dirEntry.isDirectory()) {
+            String dirName = String(dirEntry.name());
+            if (dirName.startsWith("/")) dirName = dirName.substring(1);
+            if (!dirName.isEmpty() && !dirName.startsWith(".") && dirName != "System Volume Information") {
+                File dir = SD_MMC.open("/" + dirName);
+                if (dir && dir.isDirectory()) {
+                    File f = dir.openNextFile();
+                    while (f) {
+                        if (!f.isDirectory()) {
+                            String name = String(f.name());
+                            if (name.endsWith(".jpg") || name.endsWith(".JPG")) count++;
+                        }
+                        f = dir.openNextFile();
+                    }
+                    dir.close();
+                }
             }
-            f = dir2.openNextFile();
         }
-        dir2.close();
+        dirEntry = root.openNextFile();
     }
+    root.close();
 
     return count;
 }
 
-void SDHandler::setPhotosFolder(String folderName) {
-    // Limpiar el nombre (sin / al inicio o final)
-    folderName.trim();
-    if (folderName.startsWith("/")) {
-        folderName = folderName.substring(1);
-    }
-    if (folderName.endsWith("/")) {
-        folderName = folderName.substring(0, folderName.length() - 1);
-    }
-
-    // Validar que no esté vacío
-    if (folderName.isEmpty()) {
-        folderName = DEFAULT_PHOTOS_FOLDER;
-    }
-
-    photosFolder = folderName;
-
-    // Crear la carpeta
-    if (initialized) {
-        createDirectory("/" + photosFolder);
-    }
-
-    Serial.printf("Carpeta de fotos cambiada a: /%s\n", photosFolder.c_str());
-}
-
 String SDHandler::getPhotosFolder() {
     return photosFolder;
-}
-
-void SDHandler::saveConfig() {
-    sdPrefs.begin("sdconfig", false);
-    sdPrefs.putString("folder", photosFolder);
-    sdPrefs.end();
-    Serial.println("Configuracion de SD guardada");
-}
-
-void SDHandler::loadConfig() {
-    sdPrefs.begin("sdconfig", true);
-    photosFolder = sdPrefs.getString("folder", DEFAULT_PHOTOS_FOLDER);
-    sdPrefs.end();
-    Serial.printf("Configuracion SD cargada: carpeta = %s\n", photosFolder.c_str());
 }
 
 uint64_t SDHandler::getTotalSpace() {

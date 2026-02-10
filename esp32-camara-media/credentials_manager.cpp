@@ -10,9 +10,6 @@ CredentialsManager::CredentialsManager() : credentialsLoaded(false) {
     credentials.wifiPassword = "";
     credentials.botToken = "";
     credentials.gmtOffsetSec = -18000; // UTC-5 por defecto
-    #ifdef DISCORD_ENABLED
-    credentials.discordToken = "";
-    #endif
 }
 
 void CredentialsManager::init() {
@@ -40,9 +37,6 @@ void CredentialsManager::loadCredentials() {
     credentials.wifiPassword = credPrefs.getString("password", "");
     credentials.botToken = credPrefs.getString("botToken", "");
     credentials.gmtOffsetSec = credPrefs.getLong("gmtOffset", -18000);
-    #ifdef DISCORD_ENABLED
-    credentials.discordToken = credPrefs.getString("discordTok", "");
-    #endif
     credPrefs.end();
 
     credentialsLoaded = true;
@@ -60,9 +54,6 @@ void CredentialsManager::saveCredentials() {
     credPrefs.putString("password", credentials.wifiPassword);
     credPrefs.putString("botToken", credentials.botToken);
     credPrefs.putLong("gmtOffset", credentials.gmtOffsetSec);
-    #ifdef DISCORD_ENABLED
-    credPrefs.putString("discordTok", credentials.discordToken);
-    #endif
     credPrefs.end();
 
     Serial.println("Credenciales guardadas en memoria.");
@@ -275,19 +266,6 @@ bool CredentialsManager::requestCredentials() {
         }
     }
 
-    #ifdef DISCORD_ENABLED
-    if (!(buttonPressed && hasStoredCredentials())) {
-        // Solicitar Discord Token
-        String tempDiscordToken;
-        if (requestValue("Discord Bot Token", tempDiscordToken, credentials.discordToken, false, &buttonPressed)) {
-            credentials.discordToken = tempDiscordToken;
-            anyChanged = true;
-        } else if (tempDiscordToken.length() > 0) {
-            credentials.discordToken = tempDiscordToken;
-        }
-    }
-    #endif
-
     // Guardar si hubo cambios
     if (anyChanged) {
         saveCredentials();
@@ -303,11 +281,6 @@ bool CredentialsManager::requestCredentials() {
                   (credentials.botToken.substring(0, 10) + "..." + credentials.botToken.substring(credentials.botToken.length() - 5)).c_str() :
                   (credentials.botToken.length() > 0 ? credentials.botToken.c_str() : "(no configurado)"));
     Serial.printf("  Timezone:     UTC%+ld\n", credentials.gmtOffsetSec / 3600);
-    #ifdef DISCORD_ENABLED
-    Serial.printf("  Discord Token: %s\n", credentials.discordToken.length() > 10 ?
-                  (credentials.discordToken.substring(0, 10) + "...").c_str() :
-                  (credentials.discordToken.length() > 0 ? credentials.discordToken.c_str() : "(no configurado)"));
-    #endif
     Serial.println("========================================\n");
 
     return hasStoredCredentials();
@@ -328,9 +301,3 @@ String CredentialsManager::getBotToken() {
 long CredentialsManager::getGmtOffsetSec() {
     return credentials.gmtOffsetSec;
 }
-
-#ifdef DISCORD_ENABLED
-String CredentialsManager::getDiscordToken() {
-    return credentials.discordToken;
-}
-#endif

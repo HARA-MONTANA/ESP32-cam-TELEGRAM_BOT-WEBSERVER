@@ -328,7 +328,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
             bot->sendMessage(chatId, "Uso: /fotodiaria [on|off]\n- Sin argumento: envia foto guardada en SD\n- on: activa envio automatico\n- off: desactiva envio automatico", "");
         }
     }
-    // Comando /carpeta para listar fotos guardadas
+    // Comando /carpeta para listar fotos guardadas (TODAS las carpetas)
     else if (command.startsWith("/carpeta") || command.startsWith("/folder")) {
         if (!sdCard.isInitialized()) {
             bot->sendMessage(chatId, "SD Card no disponible", "");
@@ -345,19 +345,57 @@ void TelegramBot::handleCommand(String command, String chatId) {
             }
 
             int totalPages = 0;
-            String list = sdCard.listPhotosInFolder(TELEGRAM_PHOTOS_FOLDER, page, 10, &totalPages);
+            String list = sdCard.listAllPhotosTree(page, 10, &totalPages);
 
             if (list.isEmpty()) {
-                bot->sendMessage(chatId, "No hay fotos en /" + String(TELEGRAM_PHOTOS_FOLDER), "");
+                bot->sendMessage(chatId, "No hay fotos guardadas en la SD", "");
             } else {
-                String msg = "Fotos en /" + String(TELEGRAM_PHOTOS_FOLDER) + ":\n\n";
+                String msg = "SD Card - Todas las fotos:\n\n";
                 msg += list;
-                msg += "\nPagina " + String(page) + "/" + String(totalPages);
+                msg += "\nPag. " + String(page) + "/" + String(totalPages);
                 if (totalPages > 1) {
-                    msg += "\nUsa /carpeta N para ver otra pagina";
+                    msg += "  /carpeta N = otra pagina";
                 }
-                msg += "\n\nPara enviar: /foto DD/MM/YYYY";
+                msg += "\n\nEnviar foto: /enviar N";
                 bot->sendMessage(chatId, msg, "");
+            }
+        }
+    }
+    // Comando /enviar N - enviar foto por número de la lista
+    else if (command.startsWith("/enviar") || command.startsWith("/send")) {
+        if (!sdCard.isInitialized()) {
+            bot->sendMessage(chatId, "SD Card no disponible", "");
+        } else {
+            String args = "";
+            int spaceIndex = command.indexOf(' ');
+            if (spaceIndex > 0) {
+                args = command.substring(spaceIndex + 1);
+                args.trim();
+            }
+
+            int photoIndex = args.toInt();
+            if (photoIndex < 1) {
+                int total = sdCard.countAllPhotos();
+                bot->sendMessage(chatId, "Uso: /enviar N\n\nDonde N es el numero de foto (1-" + String(total) + ")\nUsa /carpeta para ver la lista", "");
+            } else {
+                String photoPath = sdCard.getPhotoPathByIndex(photoIndex);
+                if (photoPath.isEmpty()) {
+                    int total = sdCard.countAllPhotos();
+                    bot->sendMessage(chatId, "Foto #" + String(photoIndex) + " no encontrada.\nHay " + String(total) + " fotos. Usa /carpeta para ver la lista.", "");
+                } else {
+                    bot->sendMessage(chatId, "Enviando foto #" + String(photoIndex) + "...", "");
+                    size_t photoSize = 0;
+                    uint8_t* photoData = sdCard.readPhoto(photoPath, photoSize);
+                    if (photoData && photoSize > 0) {
+                        // Extraer nombre para caption
+                        int lastSlash = photoPath.lastIndexOf('/');
+                        String fileName = (lastSlash >= 0) ? photoPath.substring(lastSlash + 1) : photoPath;
+                        sendPhoto(photoData, photoSize, "#" + String(photoIndex) + " - " + fileName);
+                        sdCard.freePhotoBuffer(photoData);
+                    } else {
+                        bot->sendMessage(chatId, "Error al leer foto de SD", "");
+                    }
+                }
             }
         }
     }
@@ -442,7 +480,8 @@ void TelegramBot::sendHelpMessage(String chatId) {
     helpMsg += "FOTOS:\n";
     helpMsg += "/foto - Capturar y enviar foto\n";
     helpMsg += "/foto DD/MM/YYYY - Enviar foto de fecha\n";
-    helpMsg += "/carpeta - Ver fotos guardadas\n\n";
+    helpMsg += "/carpeta - Ver todas las fotos guardadas\n";
+    helpMsg += "/enviar N - Enviar foto N de la lista\n\n";
 
     helpMsg += "FLASH:\n";
     helpMsg += "/flash - Activar/desactivar flash\n";
@@ -535,65 +574,103 @@ void TelegramBot::sendDailyConfigMessage(String chatId) {
     bot->sendMessage(chatId, msg, "");
 }
 
-// Variables estáticas para los callbacks de sendPhotoByBinary
-static const uint8_t* _photoData = nullptr;
-static size_t _photoSize = 0;
-static size_t _photoOffset = 0;
+// Envío directo de foto via HTTP POST multipart a Telegram API
+// Reemplaza sendPhotoByBinary que falla en ESP32-CAM
+bool TelegramBot::sendPhotoToChat(const uint8_t* imageData, size_t imageSize, String chatId, String caption) {
+    String token = credentialsManager.getBotToken();
+    String boundary = "----ESP32CAMBoundary";
 
-static bool _moreDataAvailable() {
-    return _photoOffset < _photoSize;
-}
+    // Construir cabecera multipart
+    String head = "--" + boundary + "\r\n";
+    head += "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n";
+    head += chatId + "\r\n";
 
-static byte _getNextByte() {
-    if (_photoOffset < _photoSize) {
-        return _photoData[_photoOffset++];
+    if (caption.length() > 0) {
+        head += "--" + boundary + "\r\n";
+        head += "Content-Disposition: form-data; name=\"caption\"\r\n\r\n";
+        head += caption + "\r\n";
     }
-    return 0;
-}
 
-static byte* _getNextBuffer() {
-    if (_photoOffset < _photoSize) {
-        return (byte*)&_photoData[_photoOffset];
+    head += "--" + boundary + "\r\n";
+    head += "Content-Disposition: form-data; name=\"photo\"; filename=\"photo.jpg\"\r\n";
+    head += "Content-Type: image/jpeg\r\n\r\n";
+
+    String tail = "\r\n--" + boundary + "--\r\n";
+
+    size_t totalLen = head.length() + imageSize + tail.length();
+
+    WiFiClientSecure sendClient;
+    sendClient.setInsecure();
+    sendClient.setTimeout(20);
+
+    Serial.printf("Conectando a Telegram API para chat %s...\n", chatId.c_str());
+
+    if (!sendClient.connect("api.telegram.org", 443)) {
+        Serial.println("Error conectando a api.telegram.org");
+        return false;
     }
-    return nullptr;
-}
 
-static int _getNextBufferLen() {
-    if (_photoOffset >= _photoSize) return 0;
-    size_t remaining = _photoSize - _photoOffset;
-    size_t chunk = remaining > 1024 ? 1024 : remaining;
-    _photoOffset += chunk;
-    return (int)chunk;
+    // Enviar request HTTP POST
+    sendClient.println("POST /bot" + token + "/sendPhoto HTTP/1.1");
+    sendClient.println("Host: api.telegram.org");
+    sendClient.println("Content-Length: " + String(totalLen));
+    sendClient.println("Content-Type: multipart/form-data; boundary=" + boundary);
+    sendClient.println("Connection: close");
+    sendClient.println();
+
+    // Enviar cabecera multipart
+    sendClient.print(head);
+
+    // Enviar datos de imagen en chunks de 1024 bytes
+    size_t sent = 0;
+    while (sent < imageSize) {
+        size_t chunk = imageSize - sent;
+        if (chunk > 1024) chunk = 1024;
+        size_t written = sendClient.write(imageData + sent, chunk);
+        if (written == 0) {
+            Serial.println("Error escribiendo datos de foto");
+            sendClient.stop();
+            return false;
+        }
+        sent += written;
+        delay(1); // Yield para watchdog
+    }
+
+    // Enviar cola multipart
+    sendClient.print(tail);
+
+    // Leer respuesta con timeout
+    unsigned long timeout = millis() + 15000;
+    while (!sendClient.available() && millis() < timeout) {
+        delay(10);
+    }
+
+    String response = "";
+    while (sendClient.available()) {
+        response += (char)sendClient.read();
+    }
+
+    sendClient.stop();
+
+    bool success = response.indexOf("\"ok\":true") >= 0;
+    if (success) {
+        Serial.println("Foto enviada a: " + chatId);
+    } else {
+        Serial.println("Error respuesta Telegram: " + response.substring(0, 200));
+    }
+    return success;
 }
 
 bool TelegramBot::sendPhoto(const uint8_t* imageData, size_t imageSize, String caption) {
-    if (!bot || authorizedCount == 0) return false;
+    if (authorizedCount == 0) return false;
 
     Serial.printf("Enviando foto por Telegram (%d bytes) a %d usuarios...\n", imageSize, authorizedCount);
 
     bool anySuccess = false;
 
-    // Enviar a todos los usuarios autorizados
     for (int i = 0; i < authorizedCount; i++) {
-        // Reiniciar estado para cada envío
-        _photoData = imageData;
-        _photoSize = imageSize;
-        _photoOffset = 0;
-
-        String result = bot->sendPhotoByBinary(authorizedIds[i], "image/jpeg", (int)imageSize,
-            _moreDataAvailable,
-            _getNextByte,
-            _getNextBuffer,
-            _getNextBufferLen
-        );
-
-        bool success = (result.length() > 0);
-
-        if (success) {
+        if (sendPhotoToChat(imageData, imageSize, authorizedIds[i], caption)) {
             anySuccess = true;
-            Serial.println("Foto enviada a: " + authorizedIds[i]);
-        } else {
-            Serial.println("Error enviando a: " + authorizedIds[i]);
         }
     }
 

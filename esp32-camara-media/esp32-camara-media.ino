@@ -1,26 +1,21 @@
 /*
- * ESP32-CAM Media Server con Bot de Telegram y Discord
+ * ESP32-CAM Media Server con Bot de Telegram
  *
  * Funcionalidades:
  * - Captura de fotos y streaming de video
  * - Dashboard web para configuracion visual
  * - Bot de Telegram para control remoto
- * - Bot de Discord (requiere PlatformIO con -DDISCORD_ENABLED)
  * - Almacenamiento en tarjeta SD
  * - Foto del dia automatica
  *
- * Para Arduino IDE:
- *   1. Configura la placa: "AI Thinker ESP32-CAM"
+ * Configuracion en Arduino IDE:
+ *   1. Placa: "AI Thinker ESP32-CAM"
  *   2. Partition Scheme: "Huge APP (3MB No OTA/1MB SPIFFS)"
  *   3. PSRAM: "Enabled"
- *   Nota: Discord no esta disponible en Arduino IDE (requiere PlatformIO).
  *
  * Librerias requeridas (instalar desde Gestor de Librerias):
  *   - ArduinoJson by Benoit Blanchon (v6.x)
  *   - UniversalTelegramBot by Brian Lough
- *
- * Para PlatformIO:
- *   Usa platformio.ini (este mismo archivo es el entry point)
  *
  * Hardware: ESP32-CAM AI-Thinker con OV2640
  */
@@ -34,10 +29,6 @@
 #include "web_server.h"
 #include "telegram_bot.h"
 #include "sd_handler.h"
-
-#ifdef DISCORD_ENABLED
-#include "discord_bot.h"
-#endif
 
 // Variables para control de tiempo
 unsigned long lastNTPSync = 0;
@@ -65,11 +56,7 @@ void setup() {
 
     Serial.println("\n\n================================");
     Serial.println("  ESP32-CAM Media Server");
-    #ifdef DISCORD_ENABLED
-    Serial.println("  con Telegram y Discord Bot");
-    #else
     Serial.println("  con Bot de Telegram");
-    #endif
     Serial.println("================================\n");
 
     // Inicializar gestor de credenciales
@@ -116,11 +103,6 @@ void setup() {
     // Inicializar bot de Telegram
     telegramBot.init();
 
-    // Inicializar bot de Discord (solo PlatformIO con -DDISCORD_ENABLED)
-    #ifdef DISCORD_ENABLED
-    discordBot.init();
-    #endif
-
     // Sistema listo
     systemReady = true;
     Serial.println("\n================================");
@@ -140,11 +122,6 @@ void loop() {
 
     // Manejar mensajes de Telegram
     telegramBot.handleMessages();
-
-    // Manejar mensajes de Discord
-    #ifdef DISCORD_ENABLED
-    discordBot.handleMessages();
-    #endif
 
     // Verificar si es hora de la foto del dia
     checkDailyPhoto();
@@ -272,14 +249,5 @@ void checkDailyPhoto() {
         // Tomar foto del dia
         // Siempre se guarda en SD, pero solo se envia a Telegram si esta habilitado
         telegramBot.takeDailyPhoto(config.enabled);
-
-        #ifdef DISCORD_ENABLED
-        // Enviar a Discord si esta habilitado (configuracion independiente)
-        DiscordDailyConfig discordConfig = discordBot.getDailyPhotoConfig();
-        if (discordConfig.enabled) {
-            // Solo enviar, no volver a capturar (ya se guardo en SD)
-            discordBot.sendSavedDailyPhoto();
-        }
-        #endif
     }
 }

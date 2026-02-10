@@ -15,9 +15,6 @@ struct Credentials {
     String wifiPassword;
     String botToken;          // Token de Telegram
     long gmtOffsetSec;
-    #ifdef DISCORD_ENABLED
-    String discordToken;      // Token del bot de Discord
-    #endif
 };
 
 class CredentialsManager {
@@ -35,10 +32,6 @@ public:
     String getWifiPassword();
     String getBotToken();
     long getGmtOffsetSec();
-
-    #ifdef DISCORD_ENABLED
-    String getDiscordToken();
-    #endif
 
     // Verificar si el botón de bypass está presionado
     bool isBypassButtonPressed();

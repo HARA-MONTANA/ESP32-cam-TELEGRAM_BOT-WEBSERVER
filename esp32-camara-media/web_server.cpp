@@ -543,6 +543,20 @@ String CameraWebServer::generateDashboardHTML() {
             font-size: 0.8em;
             color: #888;
         }
+        .sd-bar-container {
+            width: 100%;
+            min-width: 120px;
+            height: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            margin-top: 6px;
+            overflow: hidden;
+        }
+        .sd-bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease, background 0.5s ease;
+        }
         .toast {
             position: fixed;
             bottom: 20px;
@@ -770,7 +784,10 @@ String CameraWebServer::generateDashboardHTML() {
                     </div>
                     <div class="status-item">
                         <div class="value" id="sdValue">--</div>
-                        <div class="label">SD Libre (MB)</div>
+                        <div class="label">SD Card</div>
+                        <div class="sd-bar-container" id="sdBarContainer" style="display:none;">
+                            <div class="sd-bar-fill" id="sdBarFill"></div>
+                        </div>
                     </div>
                 </div>
                 <div class="btn-group" style="margin-top: 20px;">
@@ -987,7 +1004,22 @@ String CameraWebServer::generateDashboardHTML() {
 
                 document.getElementById('heapValue').textContent = Math.round(status.freeHeap / 1024);
                 document.getElementById('psramValue').textContent = Math.round(status.freePsram / 1024);
-                document.getElementById('sdValue').textContent = status.sdFree || '--';
+
+                if (status.sdInitialized && status.sdTotal > 0) {
+                    var freeGB = (status.sdFree / 1024).toFixed(1);
+                    var totalGB = (status.sdTotal / 1024).toFixed(1);
+                    document.getElementById('sdValue').textContent = freeGB + '/' + totalGB + ' GB Libres';
+                    var usedPct = ((status.sdUsed / status.sdTotal) * 100).toFixed(1);
+                    var bar = document.getElementById('sdBarFill');
+                    bar.style.width = usedPct + '%';
+                    if (usedPct > 90) bar.style.background = 'linear-gradient(90deg,#ff4444,#ff0000)';
+                    else if (usedPct > 70) bar.style.background = 'linear-gradient(90deg,#ffaa00,#ff6600)';
+                    else bar.style.background = 'linear-gradient(90deg,#00ff88,#00ccff)';
+                    document.getElementById('sdBarContainer').style.display = 'block';
+                } else {
+                    document.getElementById('sdValue').textContent = '--';
+                    document.getElementById('sdBarContainer').style.display = 'none';
+                }
             } catch (error) {
                 console.error('Error loading status:', error);
             }

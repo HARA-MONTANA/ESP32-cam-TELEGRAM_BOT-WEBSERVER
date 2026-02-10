@@ -803,6 +803,7 @@ String CameraWebServer::generateDashboardHTML() {
                         <button class="viewer-nav" id="prevBtn" onclick="prevPhoto()">&#9664; Anterior</button>
                         <div class="viewer-info">
                             <span class="name" id="viewerName"></span>
+                            <span id="viewerRaw" style="color:#555;font-size:0.7em;"></span>
                             <span class="counter" id="viewerCounter"></span>
                         </div>
                         <button class="viewer-nav" id="nextBtn" onclick="nextPhoto()">Siguiente &#9654;</button>
@@ -1054,7 +1055,10 @@ String CameraWebServer::generateDashboardHTML() {
                 photos.forEach(photo => {
                     const sizeKB = Math.round(photo.size / 1024);
                     html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 5px;border-bottom:1px solid rgba(0,255,255,0.1);">';
-                    html += '<span style="color:#0ff;font-size:0.85em;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + formatPhotoDate(photo.name) + ' <span style="color:#888;">(' + sizeKB + 'KB)</span></span>';
+                    html += '<div style="flex:1;overflow:hidden;min-width:0;">';
+                    html += '<div style="color:#0ff;font-size:0.85em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + formatPhotoDate(photo.name) + ' <span style="color:#888;">(' + sizeKB + 'KB)</span></div>';
+                    html += '<div style="color:#555;font-size:0.7em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + photo.name + '</div>';
+                    html += '</div>';
                     html += '<div style="display:flex;gap:5px;flex-shrink:0;margin-left:10px;">';
                     html += '<button onclick="viewPhoto(\'' + photo.name + '\')" style="padding:5px 10px;background:linear-gradient(135deg,#00f0ff,#0099aa);color:#000;border:none;border-radius:5px;cursor:pointer;font-size:0.8em;font-weight:600;">Ver</button>';
                     html += '<button onclick="downloadPhoto(\'' + photo.name + '\')" style="padding:5px 10px;background:linear-gradient(135deg,#e0ff00,#aacc00);color:#000;border:none;border-radius:5px;cursor:pointer;font-size:0.8em;font-weight:600;">Descargar</button>';
@@ -1083,9 +1087,11 @@ String CameraWebServer::generateDashboardHTML() {
             const viewer = document.getElementById('photoViewer');
             const img = document.getElementById('viewerImg');
             const nameEl = document.getElementById('viewerName');
+            const rawEl = document.getElementById('viewerRaw');
             const counterEl = document.getElementById('viewerCounter');
             img.src = '/photo?name=' + encodeURIComponent(photo.name);
             nameEl.textContent = formatPhotoDate(photo.name);
+            rawEl.textContent = photo.name;
             counterEl.textContent = (index + 1) + ' / ' + photoList.length;
             document.getElementById('prevBtn').disabled = (index === 0);
             document.getElementById('nextBtn').disabled = (index === photoList.length - 1);

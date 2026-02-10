@@ -9,6 +9,36 @@ TelegramBot telegramBot;
 static Preferences dailyPrefs;
 static Preferences authPrefs;
 
+// Formatea caption de foto con fecha legible desde el nombre del archivo
+static String formatPhotoCaption(int photoId, String photoPath) {
+    int lastSlash = photoPath.lastIndexOf('/');
+    String fileName = (lastSlash >= 0) ? photoPath.substring(lastSlash + 1) : photoPath;
+
+    // Manejar prefijo web_
+    String datePart = fileName;
+    String suffix = "";
+    if (datePart.startsWith("web_")) {
+        datePart = datePart.substring(4);
+        suffix = " (web)";
+    }
+
+    // Parsear: YYYY-MM-DD_HH-MM-SS.jpg o YYYY-MM-DD_HH-MM.jpg
+    if (datePart.length() >= 16) {
+        String year = datePart.substring(0, 4);
+        String month = datePart.substring(5, 7);
+        String day = datePart.substring(8, 10);
+        String hour = datePart.substring(11, 13);
+        String minute = datePart.substring(14, 16);
+        String second = "";
+        if (datePart.length() >= 19 && datePart.charAt(16) == '-') {
+            second = ":" + datePart.substring(17, 19);
+        }
+        return "#" + String(photoId) + " - " + day + "/" + month + "/" + year + " " + hour + ":" + minute + second + suffix;
+    }
+
+    return "#" + String(photoId) + " - " + fileName;
+}
+
 TelegramBot::TelegramBot()
     : bot(nullptr), lastCheckTime(0), checkInterval(TELEGRAM_CHECK_INTERVAL), authorizedCount(0) {
     // Valores por defecto
@@ -148,9 +178,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
                         size_t photoSize = 0;
                         uint8_t* photoData = sdCard.readPhoto(photoPath, photoSize);
                         if (photoData && photoSize > 0) {
-                            int lastSlash = photoPath.lastIndexOf('/');
-                            String fileName = (lastSlash >= 0) ? photoPath.substring(lastSlash + 1) : photoPath;
-                            sendPhoto(photoData, photoSize, "#" + String(photoId) + " - " + fileName);
+                            sendPhoto(photoData, photoSize, formatPhotoCaption(photoId, photoPath));
                             sdCard.freePhotoBuffer(photoData);
                         } else {
                             bot->sendMessage(chatId, "Error al leer foto de SD", "");
@@ -364,10 +392,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
                     size_t photoSize = 0;
                     uint8_t* photoData = sdCard.readPhoto(photoPath, photoSize);
                     if (photoData && photoSize > 0) {
-                        // Extraer nombre para caption
-                        int lastSlash = photoPath.lastIndexOf('/');
-                        String fileName = (lastSlash >= 0) ? photoPath.substring(lastSlash + 1) : photoPath;
-                        sendPhoto(photoData, photoSize, "#" + String(photoIndex) + " - " + fileName);
+                        sendPhoto(photoData, photoSize, formatPhotoCaption(photoIndex, photoPath));
                         sdCard.freePhotoBuffer(photoData);
                     } else {
                         bot->sendMessage(chatId, "Error al leer foto de SD", "");

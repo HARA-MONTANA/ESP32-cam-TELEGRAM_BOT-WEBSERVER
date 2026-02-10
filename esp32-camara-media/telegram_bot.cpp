@@ -121,7 +121,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
         sendHelpMessage(chatId);
     }
     else if ((command.startsWith("/foto") && !command.startsWith("/fotodiaria")) || command.startsWith("/photo") || command == "/captura") {
-        // Verificar si tiene argumentos de fecha
+        // Verificar si tiene argumento (número de foto)
         String args = "";
         int spaceIndex = command.indexOf(' ');
         if (spaceIndex > 0) {
@@ -130,56 +130,33 @@ void TelegramBot::handleCommand(String command, String chatId) {
         }
 
         if (args.length() > 0) {
-            // Parsear fecha: espera formato "DD MM YYYY" o "DD/MM/YYYY"
-            int year = 0, month = 0, day = 0;
-
-            // Reemplazar separadores por espacios para parseo uniforme
-            args.replace("/", " ");
-            args.replace("-", " ");
-
-            // Parsear los tres valores (DD MM YYYY)
-            int firstSpace = args.indexOf(' ');
-            if (firstSpace > 0) {
-                day = args.substring(0, firstSpace).toInt();
-                String rest = args.substring(firstSpace + 1);
-                rest.trim();
-                int secondSpace = rest.indexOf(' ');
-                if (secondSpace > 0) {
-                    month = rest.substring(0, secondSpace).toInt();
-                    year = rest.substring(secondSpace + 1).toInt();
-                }
-            }
-
-            // Validar fecha
-            if (year >= 2020 && year <= 2099 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-                // Buscar foto de esa fecha (primero en telegram_fotos, luego en fotos diarias)
+            // Enviar foto por número de ID
+            int photoId = args.toInt();
+            if (photoId < 1) {
+                int total = sdCard.countAllPhotos();
+                bot->sendMessage(chatId, "Uso: /foto N\n\nDonde N es el numero de foto (1-" + String(total) + ")\nUsa /carpeta para ver la lista", "");
+            } else {
                 if (!sdCard.isInitialized()) {
                     bot->sendMessage(chatId, "SD Card no disponible", "");
                 } else {
-                    String photoPath = sdCard.findPhotoInFolder(TELEGRAM_PHOTOS_FOLDER, year, month, day);
+                    String photoPath = sdCard.getPhotoPathByIndex(photoId);
                     if (photoPath.isEmpty()) {
-                        photoPath = sdCard.findPhotoByDate(year, month, day);
-                    }
-                    if (photoPath.isEmpty()) {
-                        char dateStr[16];
-                        snprintf(dateStr, sizeof(dateStr), "%04d-%02d-%02d", year, month, day);
-                        bot->sendMessage(chatId, "No hay foto del " + String(dateStr), "");
+                        int total = sdCard.countAllPhotos();
+                        bot->sendMessage(chatId, "Foto #" + String(photoId) + " no encontrada.\nHay " + String(total) + " fotos. Usa /carpeta para ver la lista.", "");
                     } else {
-                        bot->sendMessage(chatId, "Enviando foto...", "");
+                        bot->sendMessage(chatId, "Enviando foto #" + String(photoId) + "...", "");
                         size_t photoSize = 0;
                         uint8_t* photoData = sdCard.readPhoto(photoPath, photoSize);
                         if (photoData && photoSize > 0) {
-                            char dateStr[16];
-                            snprintf(dateStr, sizeof(dateStr), "%02d/%02d/%04d", day, month, year);
-                            sendPhoto(photoData, photoSize, "Foto del " + String(dateStr));
+                            int lastSlash = photoPath.lastIndexOf('/');
+                            String fileName = (lastSlash >= 0) ? photoPath.substring(lastSlash + 1) : photoPath;
+                            sendPhoto(photoData, photoSize, "#" + String(photoId) + " - " + fileName);
                             sdCard.freePhotoBuffer(photoData);
                         } else {
                             bot->sendMessage(chatId, "Error al leer foto de SD", "");
                         }
                     }
                 }
-            } else {
-                bot->sendMessage(chatId, "Formato invalido.\nUso: /foto DD/MM/YYYY\nEjemplo: /foto 05/01/2026", "");
             }
         } else {
             // Sin argumentos: capturar foto actual
@@ -479,7 +456,7 @@ void TelegramBot::sendHelpMessage(String chatId) {
     String helpMsg = "Comandos disponibles:\n\n";
     helpMsg += "FOTOS:\n";
     helpMsg += "/foto - Capturar y enviar foto\n";
-    helpMsg += "/foto DD/MM/YYYY - Enviar foto de fecha\n";
+    helpMsg += "/foto N - Enviar foto por numero\n";
     helpMsg += "/carpeta - Ver todas las fotos guardadas\n";
     helpMsg += "/enviar N - Enviar foto N de la lista\n\n";
 

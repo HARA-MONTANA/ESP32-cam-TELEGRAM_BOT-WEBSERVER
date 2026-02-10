@@ -26,10 +26,7 @@ public:
     int countAllPhotos();  // Cuenta total de fotos en todas las carpetas
 
     // Configuración de carpeta
-    void setPhotosFolder(String folderName);
     String getPhotosFolder();
-    void saveConfig();
-    void loadConfig();
 
     // Información de la SD
     uint64_t getTotalSpace();

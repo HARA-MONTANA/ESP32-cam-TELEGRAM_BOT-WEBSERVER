@@ -1012,9 +1012,9 @@ String CameraWebServer::generateDashboardHTML() {
                     var usedPct = ((status.sdUsed / status.sdTotal) * 100).toFixed(1);
                     var bar = document.getElementById('sdBarFill');
                     bar.style.width = usedPct + '%';
-                    if (usedPct > 90) bar.style.background = 'linear-gradient(90deg,#ff4444,#ff0000)';
-                    else if (usedPct > 70) bar.style.background = 'linear-gradient(90deg,#ffaa00,#ff6600)';
-                    else bar.style.background = 'linear-gradient(90deg,#00ff88,#00ccff)';
+                    if (usedPct > 90) bar.style.background = 'linear-gradient(90deg,#ff00ff,#aa00aa)';
+                    else if (usedPct > 70) bar.style.background = 'linear-gradient(90deg,#e0ff00,#aacc00)';
+                    else bar.style.background = 'linear-gradient(90deg,#00f0ff,#0099aa)';
                     document.getElementById('sdBarContainer').style.display = 'block';
                 } else {
                     document.getElementById('sdValue').textContent = '--';

@@ -17,8 +17,10 @@ public:
     String getLatestPhoto();
     String getDailyPhotoPath();
     bool photoExistsToday();
-    String findPhotoByDate(int year, int month, int day);  // Busca foto por fecha
-    String listPhotos(int page = 1, int perPage = 10, int* totalPages = nullptr);  // Lista fotos con paginación
+    String findPhotoByDate(int year, int month, int day);  // Busca foto por fecha en carpeta principal
+    String findPhotoInFolder(String folder, int year, int month, int day);  // Busca foto por fecha en carpeta específica
+    String listPhotos(int page = 1, int perPage = 10, int* totalPages = nullptr);  // Lista fotos de carpeta principal
+    String listPhotosInFolder(String folder, int page = 1, int perPage = 10, int* totalPages = nullptr);  // Lista fotos de carpeta específica
 
     // Configuración de carpeta
     void setPhotosFolder(String folderName);

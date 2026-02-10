@@ -108,9 +108,13 @@ void setup() {
     Serial.println("\n================================");
     Serial.println("  Sistema iniciado correctamente");
     Serial.println("================================");
-    Serial.printf("IP: http://%s\n", WiFi.localIP().toString().c_str());
-    Serial.printf("Dashboard: http://%s/\n", WiFi.localIP().toString().c_str());
-    Serial.printf("Stream: http://%s/stream\n", WiFi.localIP().toString().c_str());
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf("IP: http://%s\n", WiFi.localIP().toString().c_str());
+        Serial.printf("Dashboard: http://%s/\n", WiFi.localIP().toString().c_str());
+        Serial.printf("Stream: http://%s/stream\n", WiFi.localIP().toString().c_str());
+    } else {
+        Serial.println("WiFi: No conectado (reintentando en segundo plano)");
+    }
     Serial.println("================================\n");
 }
 
@@ -177,7 +181,7 @@ bool connectWiFi() {
     return false;
 }
 
-// Setup inicial: reintenta varias veces con backoff antes de reiniciar
+// Setup inicial: reintenta varias veces con backoff, continua sin WiFi si falla
 void setupWiFi() {
     for (int i = 0; i < WIFI_MAX_RETRIES_SETUP; i++) {
         if (i > 0) {
@@ -191,11 +195,9 @@ void setupWiFi() {
         }
     }
 
-    Serial.println("Error: No se pudo conectar despues de varios intentos.");
+    Serial.println("ADVERTENCIA: No se pudo conectar a WiFi despues de varios intentos.");
     Serial.println("Verifica SSID y contrasena.");
-    Serial.println("Reiniciando en 10 segundos...");
-    delay(10000);
-    ESP.restart();
+    Serial.println("El sistema continuara sin WiFi e intentara reconectar automaticamente.");
 }
 
 void setupTime() {

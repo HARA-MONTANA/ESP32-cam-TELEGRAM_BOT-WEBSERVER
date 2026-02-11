@@ -58,9 +58,10 @@ TelegramBot::TelegramBot()
     dailyConfig.useFlash = DAILY_PHOTO_FLASH;
     dailyConfig.enabled = DAILY_PHOTO_ENABLED;
 
-    // Inicializar array de IDs
+    // Inicializar array de IDs y flags de admin
     for (int i = 0; i < MAX_AUTHORIZED_IDS; i++) {
         authorizedIds[i] = "";
+        adminFlags[i] = false;
     }
 }
 
@@ -95,7 +96,7 @@ void TelegramBot::init() {
                        (dailyConfig.minute < 10 ? "0" : "") + String(dailyConfig.minute);
             initMsg += " (Flash: " + String(dailyConfig.useFlash ? "ON" : "OFF") + ")\n";
         }
-        initMsg += "\nUsa /ayuda para ver comandos";
+        initMsg += "\nUsa /start o /ayuda para ver comandos";
         sendMessage(initMsg);
     }
 }
@@ -484,12 +485,38 @@ void TelegramBot::handleCommand(String command, String chatId) {
             }
         }
     }
+    else if (command.startsWith("/admin ")) {
+        if (!isAdmin(chatId)) {
+            bot->sendMessage(chatId, "Solo los administradores pueden usar este comando.", "");
+            return;
+        }
+
+        String args = originalCommand.substring(originalCommand.indexOf(' ') + 1);
+        args.trim();
+
+        if (args == "" || args == "/admin") {
+            bot->sendMessage(chatId, "Uso: /admin ID\n\nHace administrador a un usuario autorizado.\nLimite: " + String(MAX_ADMINS) + " admins.\nAdmins actuales: " + String(getAdminCount()) + "/" + String(MAX_ADMINS), "");
+        } else if (!isAuthorized(args)) {
+            bot->sendMessage(chatId, "El ID " + args + " no es un usuario autorizado.\nPrimero usa /add " + args, "");
+        } else if (isAdmin(args)) {
+            bot->sendMessage(chatId, "El usuario " + args + " ya es administrador.", "");
+        } else if (getAdminCount() >= MAX_ADMINS) {
+            bot->sendMessage(chatId, "Limite de administradores alcanzado (" + String(MAX_ADMINS) + "/" + String(MAX_ADMINS) + ").\nNo se pueden agregar mas admins.", "");
+        } else {
+            if (makeAdmin(args)) {
+                bot->sendMessage(chatId, "Usuario " + args + " ahora es administrador.\nAdmins: " + String(getAdminCount()) + "/" + String(MAX_ADMINS), "");
+                bot->sendMessage(args, "Ahora eres administrador del bot.\nPuedes usar /add, /remove y /admin.", "");
+            } else {
+                bot->sendMessage(chatId, "Error al hacer admin al usuario.", "");
+            }
+        }
+    }
     else if (command == "/users" || command == "/ids") {
         String list = getAuthorizedIdsList();
         String msg = "Usuarios (" + String(authorizedCount) + "/" + String(MAX_AUTHORIZED_IDS) + "):\n\n";
         msg += list;
         if (isAdmin(chatId)) {
-            msg += "\n/add ID - Agregar\n/remove ID - Eliminar";
+            msg += "\n/add ID - Agregar\n/remove ID - Eliminar\n/admin ID - Hacer admin";
         }
         bot->sendMessage(chatId, msg, "");
     }
@@ -526,6 +553,7 @@ void TelegramBot::sendHelpMessage(String chatId) {
     if (isAdmin(chatId)) {
         helpMsg += "/add ID - Agregar usuario\n";
         helpMsg += "/remove ID - Eliminar usuario\n";
+        helpMsg += "/admin ID - Hacer administrador (max " + String(MAX_ADMINS) + ")\n";
     }
     helpMsg += "\n";
 
@@ -869,8 +897,38 @@ bool TelegramBot::isAuthorized(String chatId) {
 }
 
 bool TelegramBot::isAdmin(String chatId) {
-    // El admin es siempre el primer ID (índice 0)
-    return authorizedCount > 0 && authorizedIds[0] == chatId;
+    for (int i = 0; i < authorizedCount; i++) {
+        if (authorizedIds[i] == chatId && adminFlags[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TelegramBot::makeAdmin(String chatId) {
+    // Verificar límite de admins
+    if (getAdminCount() >= MAX_ADMINS) {
+        return false;
+    }
+
+    // Buscar al usuario y hacerlo admin
+    for (int i = 0; i < authorizedCount; i++) {
+        if (authorizedIds[i] == chatId) {
+            adminFlags[i] = true;
+            saveAuthorizedIds();
+            Serial.println("Nuevo admin: " + chatId);
+            return true;
+        }
+    }
+    return false;
+}
+
+int TelegramBot::getAdminCount() {
+    int count = 0;
+    for (int i = 0; i < authorizedCount; i++) {
+        if (adminFlags[i]) count++;
+    }
+    return count;
 }
 
 bool TelegramBot::addAuthorizedId(String chatId) {
@@ -886,6 +944,12 @@ bool TelegramBot::addAuthorizedId(String chatId) {
 
     // Agregar al final
     authorizedIds[authorizedCount] = chatId;
+    // El primer usuario es admin automáticamente
+    if (authorizedCount == 0) {
+        adminFlags[authorizedCount] = true;
+    } else {
+        adminFlags[authorizedCount] = false;
+    }
     authorizedCount++;
 
     // Guardar en memoria
@@ -896,11 +960,6 @@ bool TelegramBot::addAuthorizedId(String chatId) {
 }
 
 bool TelegramBot::removeAuthorizedId(String chatId) {
-    // No permitir eliminar el admin (índice 0)
-    if (authorizedCount > 0 && authorizedIds[0] == chatId) {
-        return false;
-    }
-
     // Buscar el ID
     int foundIndex = -1;
     for (int i = 0; i < authorizedCount; i++) {
@@ -917,10 +976,12 @@ bool TelegramBot::removeAuthorizedId(String chatId) {
     // Mover todos los elementos después del encontrado
     for (int i = foundIndex; i < authorizedCount - 1; i++) {
         authorizedIds[i] = authorizedIds[i + 1];
+        adminFlags[i] = adminFlags[i + 1];
     }
 
     // Limpiar el último y decrementar contador
     authorizedIds[authorizedCount - 1] = "";
+    adminFlags[authorizedCount - 1] = false;
     authorizedCount--;
 
     // Guardar en memoria
@@ -934,7 +995,7 @@ String TelegramBot::getAuthorizedIdsList() {
     String list = "";
     for (int i = 0; i < authorizedCount; i++) {
         list += String(i + 1) + ". " + authorizedIds[i];
-        if (i == 0) {
+        if (adminFlags[i]) {
             list += " (Admin)";
         }
         list += "\n";
@@ -955,17 +1016,19 @@ void TelegramBot::loadAuthorizedIds() {
         authorizedCount = MAX_AUTHORIZED_IDS;
     }
 
-    // Cargar cada ID
+    // Cargar cada ID y su flag de admin
     for (int i = 0; i < authorizedCount; i++) {
         String key = "id" + String(i);
         authorizedIds[i] = authPrefs.getString(key.c_str(), "");
+        String adminKey = "adm" + String(i);
+        adminFlags[i] = authPrefs.getBool(adminKey.c_str(), i == 0);  // Por defecto, el primero es admin
     }
 
     authPrefs.end();
 
     Serial.printf("IDs autorizados cargados: %d\n", authorizedCount);
     for (int i = 0; i < authorizedCount; i++) {
-        Serial.printf("  [%d] %s%s\n", i, authorizedIds[i].c_str(), i == 0 ? " (Admin)" : "");
+        Serial.printf("  [%d] %s%s\n", i, authorizedIds[i].c_str(), adminFlags[i] ? " (Admin)" : "");
     }
 }
 
@@ -973,16 +1036,20 @@ void TelegramBot::saveAuthorizedIds() {
     authPrefs.begin("authids", false);
     authPrefs.putInt("count", authorizedCount);
 
-    // Guardar cada ID
+    // Guardar cada ID y su flag de admin
     for (int i = 0; i < authorizedCount; i++) {
         String key = "id" + String(i);
         authPrefs.putString(key.c_str(), authorizedIds[i]);
+        String adminKey = "adm" + String(i);
+        authPrefs.putBool(adminKey.c_str(), adminFlags[i]);
     }
 
     // Limpiar IDs sobrantes (si se eliminaron)
     for (int i = authorizedCount; i < MAX_AUTHORIZED_IDS; i++) {
         String key = "id" + String(i);
         authPrefs.remove(key.c_str());
+        String adminKey = "adm" + String(i);
+        authPrefs.remove(adminKey.c_str());
     }
 
     authPrefs.end();

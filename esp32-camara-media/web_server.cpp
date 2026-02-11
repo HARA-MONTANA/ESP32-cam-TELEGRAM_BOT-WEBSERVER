@@ -800,13 +800,13 @@ String CameraWebServer::generateDashboardHTML() {
                 <div id="photoViewer" class="photo-viewer">
                     <img id="viewerImg" src="" alt="Vista previa">
                     <div class="viewer-bar">
-                        <button class="viewer-nav" id="prevBtn" onclick="prevPhoto()">&#9664; Anterior</button>
+                        <button class="viewer-nav" id="prevBtn" onclick="prevPhoto()">&#9664; Siguiente</button>
                         <div class="viewer-info">
                             <span class="name" id="viewerName"></span>
                             <span id="viewerRaw" style="color:#555;font-size:0.7em;"></span>
                             <span class="counter" id="viewerCounter"></span>
                         </div>
-                        <button class="viewer-nav" id="nextBtn" onclick="nextPhoto()">Siguiente &#9654;</button>
+                        <button class="viewer-nav" id="nextBtn" onclick="nextPhoto()">Anterior &#9654;</button>
                     </div>
                     <div class="viewer-bar" style="border-top:none;justify-content:center;gap:8px;padding-top:0;">
                         <button onclick="downloadPhoto(photoList[currentPhotoIndex].name)" style="padding:6px 14px;background:linear-gradient(135deg,#e0ff00,#aacc00);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:0.8em;font-weight:600;">Descargar</button>

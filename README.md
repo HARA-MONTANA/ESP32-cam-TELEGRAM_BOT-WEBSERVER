@@ -184,7 +184,7 @@ ESP32-CAM AI-Thinker
 ## Notas
 
 - La tarjeta SD es **opcional**. Sin ella, el sistema funciona normalmente pero no guarda fotos localmente.
-- Las fotos se organizan en carpetas: `/fotos_diarias` (foto automatica), `/telegram_fotos` (capturadas por Telegram) y `/fotos_tomadas` (capturadas desde el dashboard web). El formato de nombre es `YYYY-MM-DD_HH-MM.jpg`.
+- Las fotos se organizan en carpetas: `/fotos_diarias` (foto automatica), `/fotos_telegram` (capturadas por Telegram) y `/fotos_web` (capturadas desde el dashboard web). El formato de nombre es `YYYY-MM-DD_HH-MM.jpg`.
 - El flash LED (GPIO4) se comparte con la SD en modo 4-bit. Se usa modo **1-bit** para evitar conflictos.
 - El sistema se reconecta automaticamente a WiFi si pierde conexion.
 - La hora se sincroniza por NTP cada hora.

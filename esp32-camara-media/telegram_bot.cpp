@@ -121,6 +121,16 @@ void TelegramBot::processMessage(telegramMessage& msg) {
     String text = msg.text;
     String fromUser = msg.from_name;
 
+    // Manejar callback queries (botones inline)
+    if (msg.type == "callback_query") {
+        Serial.printf("Callback de %s (ID: %s): %s\n", fromUser.c_str(), chatId.c_str(), text.c_str());
+
+        if (!isAuthorized(chatId)) return;
+
+        handleCallbackQuery(text, chatId, msg.query_id);
+        return;
+    }
+
     Serial.printf("Mensaje de %s (ID: %s): %s\n", fromUser.c_str(), chatId.c_str(), text.c_str());
 
     // Si no hay usuarios autorizados, el primero que escriba se convierte en admin
@@ -374,21 +384,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
                 if (parsed > 0) page = parsed;
             }
 
-            int totalPages = 0;
-            String list = sdCard.listAllPhotosTree(page, 10, &totalPages);
-
-            if (list.isEmpty()) {
-                bot->sendMessage(chatId, "No hay fotos guardadas en la SD", "");
-            } else {
-                String msg = "SD Card - Todas las fotos:\n\n";
-                msg += list;
-                msg += "\nPag. " + String(page) + "/" + String(totalPages);
-                if (totalPages > 1) {
-                    msg += "  /carpeta N = otra pagina";
-                }
-                msg += "\n\nEnviar foto: /enviar N";
-                bot->sendMessage(chatId, msg, "");
-            }
+            sendFolderPage(chatId, page);
         }
     }
     // Comando /enviar N - enviar foto por número de la lista
@@ -525,6 +521,84 @@ void TelegramBot::handleCommand(String command, String chatId) {
     }
     else {
         bot->sendMessage(chatId, "Comando no reconocido. Usa /ayuda", "");
+    }
+}
+
+void TelegramBot::sendFolderPage(String chatId, int page) {
+    int totalPages = 0;
+    String list = sdCard.listAllPhotosTree(page, 10, &totalPages);
+
+    if (list.isEmpty()) {
+        bot->sendMessage(chatId, "No hay fotos guardadas en la SD", "");
+        return;
+    }
+
+    String msg = "SD Card - Todas las fotos:\n\n";
+    msg += list;
+    msg += "\nPag. " + String(page) + "/" + String(totalPages);
+    msg += "\n\nEnviar foto: /enviar N";
+
+    // Construir teclado inline de paginacion
+    if (totalPages > 1) {
+        String keyboard = "[[";
+        bool first = true;
+
+        // Boton "Anterior"
+        if (page > 1) {
+            keyboard += "{\"text\":\"\xE2\x97\x80 Pag " + String(page - 1) + "\",\"callback_data\":\"folder_page_" + String(page - 1) + "\"}";
+            first = false;
+        }
+
+        // Boton indicador de pagina actual
+        if (!first) keyboard += ",";
+        keyboard += "{\"text\":\"" + String(page) + " / " + String(totalPages) + "\",\"callback_data\":\"folder_noop\"}";
+
+        // Boton "Siguiente"
+        if (page < totalPages) {
+            keyboard += ",{\"text\":\"Pag " + String(page + 1) + " \xE2\x96\xB6\",\"callback_data\":\"folder_page_" + String(page + 1) + "\"}";
+        }
+
+        keyboard += "]]";
+        bot->sendMessageWithInlineKeyboard(chatId, msg, "", keyboard);
+    } else {
+        bot->sendMessage(chatId, msg, "");
+    }
+}
+
+void TelegramBot::handleCallbackQuery(String callbackData, String chatId, String queryId) {
+    // Responder al callback para quitar el reloj de carga
+    answerCallbackQuery(queryId);
+
+    if (callbackData.startsWith("folder_page_")) {
+        int page = callbackData.substring(12).toInt();
+        if (page < 1) page = 1;
+        sendFolderPage(chatId, page);
+    }
+    // folder_noop: no hacer nada (boton de pagina actual)
+}
+
+void TelegramBot::answerCallbackQuery(String queryId) {
+    if (queryId.isEmpty()) return;
+
+    String token = credentialsManager.getBotToken();
+    String url = "https://api.telegram.org/bot" + token + "/answerCallbackQuery?callback_query_id=" + queryId;
+
+    WiFiClientSecure answerClient;
+    answerClient.setInsecure();
+    answerClient.setTimeout(5);
+
+    if (answerClient.connect("api.telegram.org", 443)) {
+        answerClient.println("GET " + url.substring(url.indexOf("/bot")) + " HTTP/1.1");
+        answerClient.println("Host: api.telegram.org");
+        answerClient.println("Connection: close");
+        answerClient.println();
+
+        // Esperar respuesta brevemente
+        unsigned long timeout = millis() + 3000;
+        while (!answerClient.available() && millis() < timeout) {
+            delay(10);
+        }
+        answerClient.stop();
     }
 }
 

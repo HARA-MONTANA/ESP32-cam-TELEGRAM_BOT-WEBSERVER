@@ -66,6 +66,9 @@ private:
 
     void processMessage(telegramMessage& msg);
     void handleCommand(String command, String chatId);
+    void handleCallbackQuery(String callbackData, String chatId, String queryId);
+    void sendFolderPage(String chatId, int page);
+    void answerCallbackQuery(String queryId);
     void sendHelpMessage(String chatId);
     void sendStatusMessage(String chatId);
     void sendDailyConfigMessage(String chatId);

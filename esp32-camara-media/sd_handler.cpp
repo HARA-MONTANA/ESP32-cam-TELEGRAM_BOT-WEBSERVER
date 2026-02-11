@@ -480,6 +480,14 @@ static String formatPhotoEntry(String fullPath, int num) {
     return String(num) + ". " + name;
 }
 
+// Prioridad de carpetas para ordenar en listado
+static int getFolderPriority(const String& name) {
+    if (name == DEFAULT_PHOTOS_FOLDER) return 0;   // fotos_diarias
+    if (name == TELEGRAM_PHOTOS_FOLDER) return 1;   // fotos_telegram
+    if (name == WEB_PHOTOS_FOLDER) return 2;         // fotos_web
+    return 3;  // Otras carpetas al final
+}
+
 // Estructura para info de carpeta (uso interno)
 struct FolderInfo {
     String name;
@@ -516,10 +524,12 @@ static int collectAllPhotosFromSD(String* allPhotos, FolderInfo* folders, int* f
     }
     root.close();
 
-    // Ordenar directorios alfabéticamente
+    // Ordenar directorios por prioridad: fotos_diarias, fotos_telegram, fotos_web, resto alfabético
     for (int i = 0; i < dirCount - 1; i++) {
         for (int j = i + 1; j < dirCount; j++) {
-            if (dirNames[j] < dirNames[i]) {
+            int pi = getFolderPriority(dirNames[i]);
+            int pj = getFolderPriority(dirNames[j]);
+            if (pj < pi || (pj == pi && dirNames[j] < dirNames[i])) {
                 String temp = dirNames[i];
                 dirNames[i] = dirNames[j];
                 dirNames[j] = temp;
@@ -562,19 +572,22 @@ String SDHandler::listAllPhotosTree(int page, int perPage, int* totalPages) {
         return "";
     }
 
-    // Calcular paginación sobre el total
+    // Calcular paginación sobre el total (página 1 = fotos más recientes)
     int total = (totalPhotos + perPage - 1) / perPage;
     if (totalPages) *totalPages = total;
     if (page < 1) page = 1;
     if (page > total) page = total;
 
-    int startIndex = (page - 1) * perPage;
-    int endIndex = startIndex + perPage;
+    // Paginación inversa: página 1 muestra las fotos más recientes (números más altos)
+    int startIndex = totalPhotos - page * perPage;
+    if (startIndex < 0) startIndex = 0;
+    int endIndex = totalPhotos - (page - 1) * perPage;
     if (endIndex > totalPhotos) endIndex = totalPhotos;
 
     String result = "";
 
-    for (int f = 0; f < folderCount; f++) {
+    // Iterar carpetas en reversa para mostrar primero las que tienen fotos más recientes
+    for (int f = folderCount - 1; f >= 0; f--) {
         int folderStart = folders[f].startIndex;
         int folderEnd = folderStart + folders[f].count;
 
@@ -584,7 +597,8 @@ String SDHandler::listAllPhotosTree(int page, int perPage, int* totalPages) {
         // Encabezado de carpeta
         result += "/" + folders[f].name + " (" + String(folders[f].count) + " fotos):\n";
 
-        for (int i = folderStart; i < folderEnd; i++) {
+        // Mostrar fotos en orden inverso (más reciente primero), manteniendo numeración original
+        for (int i = folderEnd - 1; i >= folderStart; i--) {
             if (i >= startIndex && i < endIndex) {
                 result += formatPhotoEntry(allPhotos[i], i + 1) + "\n";  // 1-indexed
             }

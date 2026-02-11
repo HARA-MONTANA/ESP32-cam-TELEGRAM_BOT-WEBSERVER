@@ -55,7 +55,8 @@
 // ============================================
 #define SD_MMC_1BIT_MODE true  // Usar modo 1-bit para liberar el flash LED
 #define DEFAULT_PHOTOS_FOLDER "fotos_diarias"  // Nombre de carpeta raíz para fotos diarias
-#define TELEGRAM_PHOTOS_FOLDER "telegram_fotos"  // Carpeta para fotos tomadas por Telegram
+#define TELEGRAM_PHOTOS_FOLDER "fotos_telegram"  // Carpeta para fotos tomadas por Telegram
+#define WEB_PHOTOS_FOLDER "fotos_web"            // Carpeta para fotos tomadas desde el dashboard web
 
 // ============================================
 // LED FLASH

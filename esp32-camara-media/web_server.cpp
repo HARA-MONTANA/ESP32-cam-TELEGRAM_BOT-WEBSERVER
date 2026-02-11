@@ -25,7 +25,7 @@ void CameraWebServer::init() {
 
     // Crear carpeta para fotos capturadas desde la web
     if (sdCard.isInitialized()) {
-        SD_MMC.mkdir("/fotos_tomadas");
+        SD_MMC.mkdir("/" WEB_PHOTOS_FOLDER);
     }
 
     server.begin();
@@ -110,20 +110,21 @@ void CameraWebServer::handleWebCapture() {
 
     // Guardar en SD si está disponible
     if (sdCard.isInitialized()) {
-        if (!SD_MMC.exists("/fotos_tomadas")) {
-            SD_MMC.mkdir("/fotos_tomadas");
+        if (!SD_MMC.exists("/" WEB_PHOTOS_FOLDER)) {
+            SD_MMC.mkdir("/" WEB_PHOTOS_FOLDER);
         }
 
         struct tm timeinfo;
         String filename;
         if (getLocalTime(&timeinfo)) {
             char buf[80];
-            snprintf(buf, sizeof(buf), "/fotos_tomadas/web_%04d-%02d-%02d_%02d-%02d-%02d.jpg",
+            snprintf(buf, sizeof(buf), "/%s/web_%04d-%02d-%02d_%02d-%02d-%02d.jpg",
+                     WEB_PHOTOS_FOLDER,
                      timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
                      timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
             filename = String(buf);
         } else {
-            filename = "/fotos_tomadas/web_" + String(millis()) + ".jpg";
+            filename = "/" + String(WEB_PHOTOS_FOLDER) + "/web_" + String(millis()) + ".jpg";
         }
 
         sdCard.savePhoto(fb->buf, fb->len, filename);
@@ -140,12 +141,12 @@ void CameraWebServer::handleWebCapture() {
 }
 
 void CameraWebServer::handleListPhotos() {
-    if (!sdCard.isInitialized() || !SD_MMC.exists("/fotos_tomadas")) {
+    if (!sdCard.isInitialized() || !SD_MMC.exists("/" WEB_PHOTOS_FOLDER)) {
         server.send(200, "application/json", "[]");
         return;
     }
 
-    File dir = SD_MMC.open("/fotos_tomadas");
+    File dir = SD_MMC.open("/" WEB_PHOTOS_FOLDER);
     if (!dir || !dir.isDirectory()) {
         server.send(200, "application/json", "[]");
         return;
@@ -183,7 +184,7 @@ void CameraWebServer::handleViewPhoto() {
         return;
     }
 
-    String filename = "/fotos_tomadas/" + name;
+    String filename = "/" + String(WEB_PHOTOS_FOLDER) + "/" + name;
     size_t size = 0;
     uint8_t* data = sdCard.readPhoto(filename, size);
     if (!data) {
@@ -219,7 +220,7 @@ void CameraWebServer::handleDeletePhoto() {
         return;
     }
 
-    String filename = "/fotos_tomadas/" + name;
+    String filename = "/" + String(WEB_PHOTOS_FOLDER) + "/" + name;
     if (sdCard.deletePhoto(filename)) {
         server.send(200, "application/json", "{\"success\":true}");
         Serial.printf("Foto eliminada: %s\n", filename.c_str());
@@ -800,13 +801,13 @@ String CameraWebServer::generateDashboardHTML() {
                 <div id="photoViewer" class="photo-viewer">
                     <img id="viewerImg" src="" alt="Vista previa">
                     <div class="viewer-bar">
-                        <button class="viewer-nav" id="prevBtn" onclick="prevPhoto()">&#9664; Siguiente</button>
+                        <button class="viewer-nav" id="prevBtn" onclick="prevPhoto()">&#9664; Anterior</button>
                         <div class="viewer-info">
                             <span class="name" id="viewerName"></span>
                             <span id="viewerRaw" style="color:#555;font-size:0.7em;"></span>
                             <span class="counter" id="viewerCounter"></span>
                         </div>
-                        <button class="viewer-nav" id="nextBtn" onclick="nextPhoto()">Anterior &#9654;</button>
+                        <button class="viewer-nav" id="nextBtn" onclick="nextPhoto()">Siguiente &#9654;</button>
                     </div>
                     <div class="viewer-bar" style="border-top:none;justify-content:center;gap:8px;padding-top:0;">
                         <button onclick="downloadPhoto(photoList[currentPhotoIndex].name)" style="padding:6px 14px;background:linear-gradient(135deg,#e0ff00,#aacc00);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:0.8em;font-weight:600;">Descargar</button>

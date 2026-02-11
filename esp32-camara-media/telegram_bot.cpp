@@ -203,7 +203,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
 
             camera_fb_t* fb = camera.capturePhoto();
             if (fb) {
-                // Guardar en SD en carpeta telegram_fotos
+                // Guardar en SD en carpeta fotos_telegram
                 if (sdCard.isInitialized()) {
                     struct tm timeinfo;
                     String filename;

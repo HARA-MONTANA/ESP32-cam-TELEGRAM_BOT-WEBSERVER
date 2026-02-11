@@ -25,6 +25,7 @@ private:
     void handleStatus();
     void handleWebCapture();
     void handleListPhotos();
+    void handleListFolders();
     void handleViewPhoto();
     void handleDeletePhoto();
     void handleNotFound();

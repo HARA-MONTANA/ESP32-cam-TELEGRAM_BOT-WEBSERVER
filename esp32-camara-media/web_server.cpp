@@ -18,6 +18,7 @@ void CameraWebServer::init() {
     server.on("/settings", HTTP_POST, [this]() { handleUpdateSettings(); });
     server.on("/status", HTTP_GET, [this]() { handleStatus(); });
     server.on("/web-capture", HTTP_GET, [this]() { handleWebCapture(); });
+    server.on("/folders", HTTP_GET, [this]() { handleListFolders(); });
     server.on("/photos", HTTP_GET, [this]() { handleListPhotos(); });
     server.on("/photo", HTTP_GET, [this]() { handleViewPhoto(); });
     server.on("/delete-photo", HTTP_POST, [this]() { handleDeletePhoto(); });
@@ -140,13 +141,75 @@ void CameraWebServer::handleWebCapture() {
     camera.releaseFrame(fb);
 }
 
-void CameraWebServer::handleListPhotos() {
-    if (!sdCard.isInitialized() || !SD_MMC.exists("/" WEB_PHOTOS_FOLDER)) {
+void CameraWebServer::handleListFolders() {
+    if (!sdCard.isInitialized()) {
         server.send(200, "application/json", "[]");
         return;
     }
 
-    File dir = SD_MMC.open("/" WEB_PHOTOS_FOLDER);
+    File root = SD_MMC.open("/");
+    if (!root || !root.isDirectory()) {
+        server.send(200, "application/json", "[]");
+        return;
+    }
+
+    String json = "[";
+    bool first = true;
+    File entry = root.openNextFile();
+    while (entry) {
+        if (entry.isDirectory()) {
+            String name = String(entry.name());
+            if (name.startsWith("/")) name = name.substring(1);
+            if (!name.isEmpty() && !name.startsWith(".") && name != "System Volume Information") {
+                // Count photos in folder
+                int count = 0;
+                File dir = SD_MMC.open("/" + name);
+                if (dir && dir.isDirectory()) {
+                    File f = dir.openNextFile();
+                    while (f) {
+                        if (!f.isDirectory()) {
+                            String fname = String(f.name());
+                            if (fname.endsWith(".jpg") || fname.endsWith(".JPG")) count++;
+                        }
+                        f = dir.openNextFile();
+                    }
+                    dir.close();
+                }
+                if (!first) json += ",";
+                json += "{\"name\":\"" + name + "\",\"count\":" + String(count) + "}";
+                first = false;
+            }
+        }
+        entry = root.openNextFile();
+    }
+    root.close();
+    json += "]";
+
+    server.send(200, "application/json", json);
+}
+
+void CameraWebServer::handleListPhotos() {
+    if (!sdCard.isInitialized()) {
+        server.send(200, "application/json", "[]");
+        return;
+    }
+
+    String folder = WEB_PHOTOS_FOLDER;
+    if (server.hasArg("folder")) {
+        folder = server.arg("folder");
+        if (folder.indexOf("..") >= 0) {
+            server.send(400, "application/json", "[]");
+            return;
+        }
+    }
+
+    String folderPath = "/" + folder;
+    if (!SD_MMC.exists(folderPath)) {
+        server.send(200, "application/json", "[]");
+        return;
+    }
+
+    File dir = SD_MMC.open(folderPath);
     if (!dir || !dir.isDirectory()) {
         server.send(200, "application/json", "[]");
         return;
@@ -158,7 +221,7 @@ void CameraWebServer::handleListPhotos() {
     while (file) {
         if (!file.isDirectory()) {
             String name = String(file.name());
-            if (name.endsWith(".jpg")) {
+            if (name.endsWith(".jpg") || name.endsWith(".JPG")) {
                 if (!first) json += ",";
                 json += "{\"name\":\"" + name + "\",\"size\":" + String(file.size()) + "}";
                 first = false;
@@ -184,7 +247,16 @@ void CameraWebServer::handleViewPhoto() {
         return;
     }
 
-    String filename = "/" + String(WEB_PHOTOS_FOLDER) + "/" + name;
+    String folder = WEB_PHOTOS_FOLDER;
+    if (server.hasArg("folder")) {
+        folder = server.arg("folder");
+        if (folder.indexOf("..") >= 0) {
+            server.send(400, "text/plain", "Nombre invalido");
+            return;
+        }
+    }
+
+    String filename = "/" + folder + "/" + name;
     size_t size = 0;
     uint8_t* data = sdCard.readPhoto(filename, size);
     if (!data) {
@@ -220,7 +292,16 @@ void CameraWebServer::handleDeletePhoto() {
         return;
     }
 
-    String filename = "/" + String(WEB_PHOTOS_FOLDER) + "/" + name;
+    String folder = WEB_PHOTOS_FOLDER;
+    if (doc.containsKey("folder")) {
+        folder = doc["folder"].as<String>();
+        if (folder.indexOf("..") >= 0) {
+            server.send(400, "application/json", "{\"error\":\"Nombre invalido\"}");
+            return;
+        }
+    }
+
+    String filename = "/" + folder + "/" + name;
     if (sdCard.deletePhoto(filename)) {
         server.send(200, "application/json", "{\"success\":true}");
         Serial.printf("Foto eliminada: %s\n", filename.c_str());
@@ -558,6 +639,28 @@ String CameraWebServer::generateDashboardHTML() {
             border-radius: 4px;
             transition: width 0.5s ease, background 0.5s ease;
         }
+        .folder-tab {
+            padding: 8px 16px;
+            border: 1px solid rgba(0, 255, 255, 0.2);
+            border-radius: 8px;
+            background: rgba(10, 10, 30, 0.6);
+            color: #888;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .folder-tab:hover {
+            border-color: rgba(0, 255, 255, 0.4);
+            color: #0ff;
+        }
+        .folder-tab.active {
+            background: linear-gradient(135deg, rgba(0, 255, 255, 0.15), rgba(0, 255, 255, 0.05));
+            border-color: #0ff;
+            color: #0ff;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+            text-shadow: 0 0 5px rgba(0, 255, 255, 0.4);
+        }
         .toast {
             position: fixed;
             bottom: 20px;
@@ -797,7 +900,10 @@ String CameraWebServer::generateDashboardHTML() {
             </div>
 
             <div class="card" style="grid-column: 1 / -1;">
-                <h2>Fotos Capturadas</h2>
+                <h2>Galeria de Fotos</h2>
+                <div id="folderTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;">
+                    <p style="color:#888;font-size:0.85em;">Cargando carpetas...</p>
+                </div>
                 <div id="photoViewer" class="photo-viewer">
                     <img id="viewerImg" src="" alt="Vista previa">
                     <div class="viewer-bar">
@@ -811,7 +917,7 @@ String CameraWebServer::generateDashboardHTML() {
                     </div>
                     <div class="viewer-bar" style="border-top:none;justify-content:center;gap:8px;padding-top:0;">
                         <button onclick="downloadPhoto(photoList[currentPhotoIndex].name)" style="padding:6px 14px;background:linear-gradient(135deg,#e0ff00,#aacc00);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:0.8em;font-weight:600;">Descargar</button>
-                        <button onclick="window.open('/photo?name='+encodeURIComponent(photoList[currentPhotoIndex].name),'_blank')" style="padding:6px 14px;background:linear-gradient(135deg,#00f0ff,#0099aa);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:0.8em;font-weight:600;">Abrir en Pestana</button>
+                        <button onclick="window.open('/photo?folder='+encodeURIComponent(currentFolder)+'&name='+encodeURIComponent(photoList[currentPhotoIndex].name),'_blank')" style="padding:6px 14px;background:linear-gradient(135deg,#00f0ff,#0099aa);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:0.8em;font-weight:600;">Abrir en Pestana</button>
                         <button class="viewer-close" onclick="closeViewer()">Cerrar</button>
                     </div>
                 </div>
@@ -831,6 +937,8 @@ String CameraWebServer::generateDashboardHTML() {
         let streaming = false;
         let photoList = [];
         let currentPhotoIndex = -1;
+        let currentFolder = 'fotos_web';
+        let folderList = [];
 
         function showToast(message) {
             const toast = document.getElementById('toast');
@@ -848,16 +956,13 @@ String CameraWebServer::generateDashboardHTML() {
                 img.src = '/stream?' + Date.now();
                 btn.textContent = 'Detener Stream';
             } else {
-                // Abortar la conexión HTTP del stream actual
                 img.src = '';
-                // Reemplazar el elemento img para asegurar desconexión completa
                 const parent = img.parentNode;
                 const newImg = document.createElement('img');
                 newImg.id = 'stream';
                 newImg.alt = 'Stream';
                 parent.replaceChild(newImg, img);
                 btn.textContent = 'Iniciar Stream';
-                // Esperar a que el ESP32 libere el servidor antes de pedir captura
                 setTimeout(() => {
                     const currentImg = document.getElementById('stream');
                     if (currentImg && !streaming) {
@@ -877,14 +982,15 @@ String CameraWebServer::generateDashboardHTML() {
                 const photoName = response.headers.get('X-Photo-Name');
                 const img = document.getElementById('stream');
                 if (photoName) {
-                    // Apuntar al archivo guardado en SD para que "abrir imagen" funcione
-                    img.src = '/photo?name=' + encodeURIComponent(photoName);
+                    img.src = '/photo?folder=fotos_web&name=' + encodeURIComponent(photoName);
                     showToast('Foto guardada: ' + photoName);
-                    // Recargar lista y mostrar la foto nueva en el visor
-                    await loadPhotos();
-                    if (photoList.length > 0) showViewer(0);
+                    if (currentFolder === 'fotos_web') {
+                        await loadPhotos();
+                        if (photoList.length > 0) showViewer(0);
+                    } else {
+                        selectFolder('fotos_web');
+                    }
                 } else {
-                    // SD no disponible, mostrar como blob temporal
                     const blob = await response.blob();
                     img.src = URL.createObjectURL(blob);
                     showToast('Foto capturada (sin SD)');
@@ -898,7 +1004,6 @@ String CameraWebServer::generateDashboardHTML() {
             const btn = document.getElementById('streamBtn');
 
             if (streaming) {
-                // Detener stream primero para liberar el servidor
                 const img = document.getElementById('stream');
                 streaming = false;
                 img.src = '';
@@ -918,7 +1023,6 @@ String CameraWebServer::generateDashboardHTML() {
             const slider = document.getElementById(name + 'Val');
             if (slider) slider.textContent = value;
 
-            // Si se cambia resolucion durante stream, detener, aplicar y reiniciar
             if (name === 'frameSize' && streaming) {
                 const img = document.getElementById('stream');
                 const btn = document.getElementById('streamBtn');
@@ -1027,6 +1131,51 @@ String CameraWebServer::generateDashboardHTML() {
             }
         }
 
+        function getFolderDisplayName(name) {
+            if (name === 'fotos_diarias') return 'Diarias';
+            if (name === 'fotos_telegram') return 'Telegram';
+            if (name === 'fotos_web') return 'Web';
+            return name;
+        }
+
+        async function loadFolders() {
+            try {
+                const response = await fetch('/folders');
+                const folders = await response.json();
+                folderList = folders;
+                const container = document.getElementById('folderTabs');
+
+                if (folders.length === 0) {
+                    container.innerHTML = '<p style="color:#888;font-size:0.85em;">No hay carpetas</p>';
+                    return;
+                }
+
+                let html = '';
+                folders.forEach(f => {
+                    const isActive = f.name === currentFolder ? ' active' : '';
+                    html += '<button class="folder-tab' + isActive + '" onclick="selectFolder(\'' + f.name + '\')">';
+                    html += getFolderDisplayName(f.name) + ' (' + f.count + ')';
+                    html += '</button>';
+                });
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Error loading folders:', error);
+            }
+        }
+
+        function selectFolder(folder) {
+            currentFolder = folder;
+            closeViewer();
+            // Update tab active state
+            document.querySelectorAll('.folder-tab').forEach(tab => {
+                tab.classList.remove('active');
+                if (tab.textContent.startsWith(getFolderDisplayName(folder))) {
+                    tab.classList.add('active');
+                }
+            });
+            loadPhotos();
+        }
+
         function formatPhotoDate(name) {
             var d = name;
             if (d.startsWith('web_')) d = d.substring(4);
@@ -1040,13 +1189,13 @@ String CameraWebServer::generateDashboardHTML() {
 
         async function loadPhotos() {
             try {
-                const response = await fetch('/photos');
+                const response = await fetch('/photos?folder=' + encodeURIComponent(currentFolder));
                 const photos = await response.json();
                 const gallery = document.getElementById('photoGallery');
 
                 if (photos.length === 0) {
                     photoList = [];
-                    gallery.innerHTML = '<p style="color:#888;text-align:center;">No hay fotos guardadas</p>';
+                    gallery.innerHTML = '<p style="color:#888;text-align:center;">No hay fotos en ' + getFolderDisplayName(currentFolder) + '</p>';
                     return;
                 }
 
@@ -1077,7 +1226,7 @@ String CameraWebServer::generateDashboardHTML() {
             if (idx >= 0) {
                 showViewer(idx);
             } else {
-                window.open('/photo?name=' + encodeURIComponent(name), '_blank');
+                window.open('/photo?folder=' + encodeURIComponent(currentFolder) + '&name=' + encodeURIComponent(name), '_blank');
             }
         }
 
@@ -1090,7 +1239,7 @@ String CameraWebServer::generateDashboardHTML() {
             const nameEl = document.getElementById('viewerName');
             const rawEl = document.getElementById('viewerRaw');
             const counterEl = document.getElementById('viewerCounter');
-            img.src = '/photo?name=' + encodeURIComponent(photo.name);
+            img.src = '/photo?folder=' + encodeURIComponent(currentFolder) + '&name=' + encodeURIComponent(photo.name);
             nameEl.textContent = formatPhotoDate(photo.name);
             rawEl.textContent = photo.name;
             counterEl.textContent = (index + 1) + ' / ' + photoList.length;
@@ -1114,7 +1263,7 @@ String CameraWebServer::generateDashboardHTML() {
 
         function downloadPhoto(name) {
             const a = document.createElement('a');
-            a.href = '/photo?name=' + encodeURIComponent(name) + '&dl=1';
+            a.href = '/photo?folder=' + encodeURIComponent(currentFolder) + '&name=' + encodeURIComponent(name) + '&dl=1';
             a.download = name;
             document.body.appendChild(a);
             a.click();
@@ -1127,11 +1276,12 @@ String CameraWebServer::generateDashboardHTML() {
                 const response = await fetch('/delete-photo', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name })
+                    body: JSON.stringify({ name: name, folder: currentFolder })
                 });
                 if (response.ok) {
                     showToast('Foto eliminada');
                     loadPhotos();
+                    loadFolders();
                 }
             } catch (error) {
                 showToast('Error al eliminar');
@@ -1141,6 +1291,7 @@ String CameraWebServer::generateDashboardHTML() {
         // Cargar configuracion al inicio
         loadSettings();
         loadStatus();
+        loadFolders();
         loadPhotos();
 
         // Actualizar estado cada 5 segundos

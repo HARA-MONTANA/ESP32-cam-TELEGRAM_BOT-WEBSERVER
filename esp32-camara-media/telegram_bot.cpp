@@ -377,6 +377,9 @@ void TelegramBot::handleCommand(String command, String chatId) {
             int totalPages = 0;
             String list = sdCard.listAllPhotosTree(page, 10, &totalPages);
 
+            // Corregir página si excede el total
+            if (totalPages > 0 && page > totalPages) page = totalPages;
+
             if (list.isEmpty()) {
                 bot->sendMessage(chatId, "No hay fotos guardadas en la SD", "");
             } else {

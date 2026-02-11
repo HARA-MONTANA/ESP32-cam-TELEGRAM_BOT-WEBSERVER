@@ -3,6 +3,7 @@
 #include "sd_handler.h"
 #include "config.h"
 #include "credentials_manager.h"
+#include <WiFi.h>
 #include <Preferences.h>
 
 TelegramBot telegramBot;
@@ -67,6 +68,7 @@ TelegramBot::TelegramBot()
 
 void TelegramBot::init() {
     client.setInsecure();  // No verificar certificado SSL
+    client.setTimeout(10); // 10 segundos timeout para llamadas API de Telegram
 
     bot = new UniversalTelegramBot(credentialsManager.getBotToken(), client);
     bot->longPoll = 0;
@@ -101,15 +103,29 @@ void TelegramBot::init() {
     }
 }
 
+void TelegramBot::reinitBot() {
+    // Cerrar conexion SSL anterior y reconfigurar
+    client.stop();
+    client.setInsecure();
+    client.setTimeout(10);
+    Serial.println("Bot de Telegram reinicializado tras reconexion WiFi");
+}
+
 void TelegramBot::handleMessages() {
+    // No intentar si WiFi no esta conectado
+    if (WiFi.status() != WL_CONNECTED) return;
+
     if (millis() - lastCheckTime > checkInterval) {
         int numNewMessages = bot->getUpdates(bot->last_message_received + 1);
 
-        while (numNewMessages) {
+        // Limitar a 3 lotes para no bloquear el loop principal demasiado tiempo
+        int batches = 0;
+        while (numNewMessages && batches < 3) {
             for (int i = 0; i < numNewMessages; i++) {
                 processMessage(bot->messages[i]);
             }
             numNewMessages = bot->getUpdates(bot->last_message_received + 1);
+            batches++;
         }
 
         lastCheckTime = millis();

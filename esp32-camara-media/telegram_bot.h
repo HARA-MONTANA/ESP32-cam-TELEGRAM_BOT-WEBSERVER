@@ -23,6 +23,7 @@ public:
     TelegramBot();
 
     void init();
+    void reinitBot();  // Reinicializar conexion del bot (tras reconexion WiFi)
     void handleMessages();
     bool sendPhoto(const uint8_t* imageData, size_t imageSize, String caption = "");
     bool sendPhotoToChat(const uint8_t* imageData, size_t imageSize, String chatId, String caption = "");

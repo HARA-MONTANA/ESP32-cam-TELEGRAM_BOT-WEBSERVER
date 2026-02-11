@@ -39,8 +39,14 @@ bool systemReady = false;
 unsigned long lastWiFiRetry = 0;
 int wifiRetryCount = 0;
 #define WIFI_MAX_RETRIES_SETUP 5        // Reintentos durante setup inicial
-#define WIFI_RETRY_INTERVAL_LOOP 30000  // 30s entre reintentos en loop
+#define WIFI_RETRY_INTERVAL_LOOP 30000  // 30s entre reintentos en loop (base)
+#define WIFI_MAX_BACKOFF 4              // Maximo exponente para backoff (30s * 2^4 = ~8 min)
 #define WIFI_CONNECT_TIMEOUT 15000      // 15s timeout por intento de conexion
+
+// Variables para monitoreo de salud del sistema
+unsigned long lastHealthCheck = 0;
+#define HEALTH_CHECK_INTERVAL 60000     // Chequeo de salud cada 60 segundos
+#define HEAP_CRITICAL_THRESHOLD 20000   // Reiniciar si heap baja de 20KB
 
 // Declaracion de funciones
 bool connectWiFi();
@@ -130,25 +136,54 @@ void loop() {
     // Verificar si es hora de la foto del dia
     checkDailyPhoto();
 
-    // Reconectar WiFi si se desconecta (sin reiniciar el sistema)
+    // Reconectar WiFi si se desconecta (con backoff exponencial)
     if (WiFi.status() != WL_CONNECTED) {
-        if (millis() - lastWiFiRetry > WIFI_RETRY_INTERVAL_LOOP) {
+        int backoffExponent = min(wifiRetryCount, WIFI_MAX_BACKOFF);
+        unsigned long retryInterval = WIFI_RETRY_INTERVAL_LOOP * (1UL << backoffExponent);
+        if (millis() - lastWiFiRetry > retryInterval) {
             wifiRetryCount++;
-            Serial.printf("WiFi desconectado, reintento #%d...\n", wifiRetryCount);
+            Serial.printf("WiFi desconectado, reintento #%d (proximo en %lus)...\n",
+                          wifiRetryCount, retryInterval / 1000);
             lastWiFiRetry = millis();
             connectWiFi();
         }
     } else if (wifiRetryCount > 0) {
-        // WiFi se reconecto, resetear contador
+        // WiFi se reconecto, resetear contador y reinicializar bot
         Serial.println("WiFi reconectado exitosamente.");
         wifiRetryCount = 0;
+        telegramBot.reinitBot();
     }
 
-    // Sincronizar NTP periodicamente
+    // Sincronizar NTP periodicamente (con validacion)
     if (millis() - lastNTPSync > NTP_SYNC_INTERVAL) {
         configTime(credentialsManager.getGmtOffsetSec(), DAYLIGHT_OFFSET_SEC, NTP_SERVER);
-        lastNTPSync = millis();
-        Serial.println("Hora sincronizada con NTP");
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo, 5000)) {
+            lastNTPSync = millis();
+            Serial.printf("NTP sincronizado: %02d:%02d:%02d\n",
+                          timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+        } else {
+            // Reintentar en 5 minutos en vez de esperar 1 hora
+            lastNTPSync = millis() - NTP_SYNC_INTERVAL + 300000;
+            Serial.println("Fallo sincronizacion NTP, reintentando en 5 min");
+        }
+    }
+
+    // Monitoreo de salud del sistema
+    if (millis() - lastHealthCheck > HEALTH_CHECK_INTERVAL) {
+        lastHealthCheck = millis();
+        uint32_t freeHeap = ESP.getFreeHeap();
+        Serial.printf("[Salud] Heap: %u bytes | PSRAM: %u bytes | WiFi: %s (RSSI: %d)\n",
+                      freeHeap, ESP.getFreePsram(),
+                      WiFi.status() == WL_CONNECTED ? "OK" : "DESCONECTADO",
+                      WiFi.RSSI());
+
+        // Si el heap esta criticamente bajo, reiniciar para evitar crashes
+        if (freeHeap < HEAP_CRITICAL_THRESHOLD) {
+            Serial.println("[Salud] CRITICO: Heap muy bajo, reiniciando ESP32...");
+            delay(1000);
+            ESP.restart();
+        }
     }
 }
 
@@ -240,9 +275,12 @@ void checkDailyPhoto() {
     // Obtener configuracion actual de foto diaria de Telegram
     DailyPhotoConfig config = telegramBot.getDailyPhotoConfig();
 
-    // Verificar si es la hora configurada para la foto del dia
-    if (timeinfo.tm_hour == config.hour &&
-        timeinfo.tm_min == config.minute &&
+    // Usar ventana de 5 minutos para no perder la foto si el loop se bloquea
+    int currentMinutes = timeinfo.tm_hour * 60 + timeinfo.tm_min;
+    int targetMinutes = config.hour * 60 + config.minute;
+
+    if (currentMinutes >= targetMinutes &&
+        currentMinutes < targetMinutes + 5 &&
         timeinfo.tm_mday != lastDailyPhotoDay) {
 
         Serial.println("Hora de la foto del dia!");

@@ -223,7 +223,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
     else if (command == "/estado" || command == "/status") {
         sendStatusMessage(chatId);
     }
-    // Comando /flash: toggle unico que afecta fotos y foto diaria
+    // Comando /flash on|off: requiere argumento explícito
     else if (command.startsWith("/flash")) {
         String args = "";
         int spaceIndex = command.indexOf(' ');
@@ -232,27 +232,25 @@ void TelegramBot::handleCommand(String command, String chatId) {
             args.trim();
         }
 
-        bool newFlash;
         if (args == "on") {
-            newFlash = true;
+            camera.setFlash(true);
+            camera.saveSettings();
+            dailyConfig.useFlash = true;
+            saveDailyPhotoConfig();
+            String msg = "Flash: ACTIVADO\n(Aplica a fotos y foto diaria)";
+            bot->sendMessage(chatId, msg, "");
         } else if (args == "off") {
-            newFlash = false;
+            camera.setFlash(false);
+            camera.saveSettings();
+            dailyConfig.useFlash = false;
+            saveDailyPhotoConfig();
+            String msg = "Flash: DESACTIVADO\n(Aplica a fotos y foto diaria)";
+            bot->sendMessage(chatId, msg, "");
         } else {
-            // Toggle
             CameraSettings currentSettings = camera.getSettings();
-            newFlash = !currentSettings.flashEnabled;
+            String estado = currentSettings.flashEnabled ? "ACTIVADO" : "DESACTIVADO";
+            bot->sendMessage(chatId, "Uso: /flash on o /flash off\nEstado actual: " + estado, "");
         }
-
-        camera.setFlash(newFlash);
-        camera.saveSettings();
-
-        // Sincronizar con foto diaria
-        dailyConfig.useFlash = newFlash;
-        saveDailyPhotoConfig();
-
-        String msg = "Flash: " + String(newFlash ? "ACTIVADO" : "DESACTIVADO") + "\n";
-        msg += "(Aplica a fotos y foto diaria)";
-        bot->sendMessage(chatId, msg, "");
     }
     // Comando para ver configuración de foto diaria
     else if (command == "/config" || command == "/configuracion") {
@@ -486,7 +484,8 @@ void TelegramBot::sendHelpMessage(String chatId) {
     helpMsg += "/enviar N - Enviar foto N de la lista\n\n";
 
     helpMsg += "FLASH:\n";
-    helpMsg += "/flash - Activar/desactivar flash\n";
+    helpMsg += "/flash on - Activar flash\n";
+    helpMsg += "/flash off - Desactivar flash\n";
     helpMsg += "(Aplica a fotos y foto diaria)\n\n";
 
     helpMsg += "FOTO DIARIA:\n";
@@ -571,7 +570,7 @@ void TelegramBot::sendDailyConfigMessage(String chatId) {
     msg += "/fotodiaria - Ver foto guardada\n";
     msg += "/fotodiaria on/off - Envio automatico\n";
     msg += "/hora HH:MM - Cambiar hora\n";
-    msg += "/flash - Activar/desactivar flash";
+    msg += "/flash on|off - Activar/desactivar flash";
 
     bot->sendMessage(chatId, msg, "");
 }

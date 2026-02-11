@@ -374,10 +374,10 @@ String SDHandler::listPhotosInFolder(String folder, int page, int perPage, int* 
         return "";
     }
 
-    // Ordenar archivos alfabéticamente (más recientes primero por formato YYYY-MM-DD)
+    // Ordenar archivos alfabéticamente (más antiguos primero por formato YYYY-MM-DD)
     for (int i = 0; i < fileCount - 1; i++) {
         for (int j = i + 1; j < fileCount; j++) {
-            if (files[j] > files[i]) {
+            if (files[j] < files[i]) {
                 String temp = files[i];
                 files[i] = files[j];
                 files[j] = temp;
@@ -437,10 +437,10 @@ static int collectPhotosFromFolder(String folderPath, String* files, int maxFile
     }
     dir.close();
 
-    // Ordenar alfabéticamente descendente (más recientes primero)
+    // Ordenar alfabéticamente ascendente (más antiguos primero)
     for (int i = 0; i < count - 1; i++) {
         for (int j = i + 1; j < count; j++) {
-            if (files[j] > files[i]) {
+            if (files[j] < files[i]) {
                 String temp = files[i];
                 files[i] = files[j];
                 files[j] = temp;

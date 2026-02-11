@@ -81,13 +81,16 @@ El primer usuario que escriba al bot se convierte automaticamente en **administr
 | Comando | Descripcion |
 |---------|-------------|
 | `/foto` | Capturar y enviar foto |
-| `/foto DD/MM/YYYY` | Enviar foto guardada de una fecha |
+| `/foto N` | Enviar foto por numero (ver `/carpeta`) |
+| `/carpeta` | Ver todas las fotos guardadas en la SD |
+| `/carpeta N` | Ver pagina N de la lista de fotos |
+| `/enviar N` | Enviar foto N de la lista |
 
 ### Flash
 | Comando | Descripcion |
 |---------|-------------|
-| `/flash on` | Activar flash LED |
-| `/flash off` | Desactivar flash LED |
+| `/flash on` | Activar flash LED (aplica a fotos y foto diaria) |
+| `/flash off` | Desactivar flash LED (aplica a fotos y foto diaria) |
 
 ### Foto diaria
 | Comando | Descripcion |
@@ -97,13 +100,6 @@ El primer usuario que escriba al bot se convierte automaticamente en **administr
 | `/fotodiaria off` | Desactivar envio (sigue guardando en SD) |
 | `/config` | Ver configuracion actual |
 | `/hora HH:MM` | Cambiar hora de la foto diaria |
-| `/flashdiario` | Toggle flash para foto diaria |
-
-### SD Card
-| Comando | Descripcion |
-|---------|-------------|
-| `/carpeta` | Ver carpeta actual de fotos |
-| `/carpeta nombre` | Cambiar carpeta de fotos |
 
 ### Usuarios (solo admin)
 | Comando | Descripcion |
@@ -188,7 +184,7 @@ ESP32-CAM AI-Thinker
 ## Notas
 
 - La tarjeta SD es **opcional**. Sin ella, el sistema funciona normalmente pero no guarda fotos localmente.
-- Las fotos se guardan con formato `YYYY-MM-DD_HH-MM.jpg` en la carpeta configurada (por defecto `/fotos`).
+- Las fotos se organizan en carpetas: `/fotos_diarias` (foto automatica), `/telegram_fotos` (capturadas por Telegram) y `/fotos_tomadas` (capturadas desde el dashboard web). El formato de nombre es `YYYY-MM-DD_HH-MM.jpg`.
 - El flash LED (GPIO4) se comparte con la SD en modo 4-bit. Se usa modo **1-bit** para evitar conflictos.
 - El sistema se reconecta automaticamente a WiFi si pierde conexion.
 - La hora se sincroniza por NTP cada hora.

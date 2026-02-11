@@ -9,8 +9,8 @@ TelegramBot telegramBot;
 static Preferences dailyPrefs;
 static Preferences authPrefs;
 
-// Formatea caption de foto con fecha legible desde el nombre del archivo
-static String formatPhotoCaption(int photoId, String photoPath) {
+// Formatea caption de foto con fecha legible desde el nombre del archivo y peso
+static String formatPhotoCaption(int photoId, String photoPath, size_t photoSize) {
     int lastSlash = photoPath.lastIndexOf('/');
     String fileName = (lastSlash >= 0) ? photoPath.substring(lastSlash + 1) : photoPath;
 
@@ -21,6 +21,8 @@ static String formatPhotoCaption(int photoId, String photoPath) {
         datePart = datePart.substring(4);
         suffix = " (web)";
     }
+
+    String caption;
 
     // Parsear: YYYY-MM-DD_HH-MM-SS.jpg o YYYY-MM-DD_HH-MM.jpg
     if (datePart.length() >= 16) {
@@ -33,10 +35,19 @@ static String formatPhotoCaption(int photoId, String photoPath) {
         if (datePart.length() >= 19 && datePart.charAt(16) == '-') {
             second = ":" + datePart.substring(17, 19);
         }
-        return "#" + String(photoId) + " - " + day + "/" + month + "/" + year + " " + hour + ":" + minute + second + suffix;
+        caption = "#" + String(photoId) + " - " + day + "/" + month + "/" + year + " " + hour + ":" + minute + second + suffix;
+    } else {
+        caption = "#" + String(photoId) + " - " + fileName;
     }
 
-    return "#" + String(photoId) + " - " + fileName;
+    // Agregar peso de la foto
+    if (photoSize >= 1024) {
+        caption += "\nPeso: " + String(photoSize / 1024.0, 1) + " KB";
+    } else {
+        caption += "\nPeso: " + String(photoSize) + " bytes";
+    }
+
+    return caption;
 }
 
 TelegramBot::TelegramBot()
@@ -178,7 +189,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
                         size_t photoSize = 0;
                         uint8_t* photoData = sdCard.readPhoto(photoPath, photoSize);
                         if (photoData && photoSize > 0) {
-                            sendPhoto(photoData, photoSize, formatPhotoCaption(photoId, photoPath));
+                            sendPhoto(photoData, photoSize, formatPhotoCaption(photoId, photoPath, photoSize));
                             sdCard.freePhotoBuffer(photoData);
                         } else {
                             bot->sendMessage(chatId, "Error al leer foto de SD", "");
@@ -212,8 +223,23 @@ void TelegramBot::handleCommand(String command, String chatId) {
                     sdCard.savePhoto(fb->buf, fb->len, filename);
                 }
 
+                // Construir caption con fecha/hora y peso
+                String caption = "Foto capturada";
+                struct tm captureTime;
+                if (getLocalTime(&captureTime)) {
+                    char timeBuf[32];
+                    strftime(timeBuf, sizeof(timeBuf), "%d/%m/%Y %H:%M:%S", &captureTime);
+                    caption += "\n" + String(timeBuf);
+                }
+                // Mostrar peso de la foto
+                if (fb->len >= 1024) {
+                    caption += "\nPeso: " + String(fb->len / 1024.0, 1) + " KB";
+                } else {
+                    caption += "\nPeso: " + String(fb->len) + " bytes";
+                }
+
                 // Enviar por Telegram
-                sendPhoto(fb->buf, fb->len, "Foto capturada");
+                sendPhoto(fb->buf, fb->len, caption);
                 camera.releaseFrame(fb);
             } else {
                 bot->sendMessage(chatId, "Error al capturar la foto", "");
@@ -390,7 +416,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
                     size_t photoSize = 0;
                     uint8_t* photoData = sdCard.readPhoto(photoPath, photoSize);
                     if (photoData && photoSize > 0) {
-                        sendPhoto(photoData, photoSize, formatPhotoCaption(photoIndex, photoPath));
+                        sendPhoto(photoData, photoSize, formatPhotoCaption(photoIndex, photoPath, photoSize));
                         sdCard.freePhotoBuffer(photoData);
                     } else {
                         bot->sendMessage(chatId, "Error al leer foto de SD", "");

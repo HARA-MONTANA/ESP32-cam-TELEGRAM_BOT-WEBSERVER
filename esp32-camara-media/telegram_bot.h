@@ -8,6 +8,7 @@
 
 // Máximo de usuarios autorizados
 #define MAX_AUTHORIZED_IDS 10
+#define MAX_ADMINS 3
 
 // Estructura para configuración de foto diaria
 struct DailyPhotoConfig {
@@ -42,6 +43,8 @@ public:
     // Gestión de usuarios autorizados
     bool isAuthorized(String chatId);
     bool isAdmin(String chatId);
+    bool makeAdmin(String chatId);
+    int getAdminCount();
     bool addAuthorizedId(String chatId);
     bool removeAuthorizedId(String chatId);
     String getAuthorizedIdsList();
@@ -56,9 +59,10 @@ private:
     // Configuración de foto diaria
     DailyPhotoConfig dailyConfig;
 
-    // Lista de IDs autorizados (el primero es el admin)
+    // Lista de IDs autorizados
     String authorizedIds[MAX_AUTHORIZED_IDS];
     int authorizedCount;
+    bool adminFlags[MAX_AUTHORIZED_IDS];  // true = es admin
 
     void processMessage(telegramMessage& msg);
     void handleCommand(String command, String chatId);

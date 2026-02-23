@@ -854,6 +854,9 @@ bool TelegramBot::sendMessage(String message) {
 }
 
 bool TelegramBot::takeDailyPhoto(bool sendToTelegram) {
+    // Despertar el sistema antes de enviar para garantizar WiFi a plena potencia
+    sleepManager.registerActivity();
+
     // Flash se maneja en capturePhoto() segun settings.flashEnabled
     camera_fb_t* fb = camera.capturePhoto();
 

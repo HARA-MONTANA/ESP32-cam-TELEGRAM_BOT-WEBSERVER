@@ -15,7 +15,7 @@ public:
 private:
     WebServer server;
 
-    // Handlers de rutas
+    // Handlers de rutas - fotos
     void handleRoot();
     void handleStream();
     void handleCapture();
@@ -28,6 +28,15 @@ private:
     void handleListFolders();
     void handleViewPhoto();
     void handleDeletePhoto();
+
+    // Handlers de rutas - grabaciones de video
+    void handleStartRecording();
+    void handleStopRecording();
+    void handleRecordingStatus();
+    void handleListRecordings();
+    void handleDownloadRecording();
+    void handleDeleteRecording();
+
     void handleNotFound();
 
     // Generar HTML del dashboard

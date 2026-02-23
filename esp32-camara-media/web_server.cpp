@@ -1,6 +1,7 @@
 #include "web_server.h"
 #include "camera_handler.h"
 #include "sd_handler.h"
+#include "recording_handler.h"
 #include "config.h"
 #include "sleep_manager.h"
 #include "esp_camera.h"
@@ -23,11 +24,21 @@ void CameraWebServer::init() {
     server.on("/photos", HTTP_GET, [this]() { handleListPhotos(); });
     server.on("/photo", HTTP_GET, [this]() { handleViewPhoto(); });
     server.on("/delete-photo", HTTP_POST, [this]() { handleDeletePhoto(); });
+
+    // Rutas de grabación de video
+    server.on("/recording/start",  HTTP_GET,  [this]() { handleStartRecording(); });
+    server.on("/recording/stop",   HTTP_GET,  [this]() { handleStopRecording(); });
+    server.on("/recording/status", HTTP_GET,  [this]() { handleRecordingStatus(); });
+    server.on("/recordings",       HTTP_GET,  [this]() { handleListRecordings(); });
+    server.on("/recording",        HTTP_GET,  [this]() { handleDownloadRecording(); });
+    server.on("/recording/delete", HTTP_POST, [this]() { handleDeleteRecording(); });
+
     server.onNotFound([this]() { handleNotFound(); });
 
-    // Crear carpeta para fotos capturadas desde la web
+    // Crear carpetas necesarias
     if (sdCard.isInitialized()) {
         SD_MMC.mkdir("/" WEB_PHOTOS_FOLDER);
+        SD_MMC.mkdir("/" RECORDINGS_FOLDER);
     }
 
     server.begin();
@@ -165,7 +176,8 @@ void CameraWebServer::handleListFolders() {
         if (entry.isDirectory()) {
             String name = String(entry.name());
             if (name.startsWith("/")) name = name.substring(1);
-            if (!name.isEmpty() && !name.startsWith(".") && name != "System Volume Information") {
+            if (!name.isEmpty() && !name.startsWith(".") &&
+                name != "System Volume Information" && name != RECORDINGS_FOLDER) {
                 // Count photos in folder
                 int count = 0;
                 File dir = SD_MMC.open("/" + name);
@@ -315,6 +327,120 @@ void CameraWebServer::handleDeletePhoto() {
     }
 }
 
+// ── Handlers de grabación ──────────────────────────────────────────────────
+
+void CameraWebServer::handleStartRecording() {
+    sleepManager.registerActivity();
+
+    if (!sdCard.isInitialized()) {
+        server.send(500, "application/json", "{\"success\":false,\"error\":\"SD no disponible\"}");
+        return;
+    }
+
+    int fps = 10;
+    if (server.hasArg("fps")) {
+        fps = server.arg("fps").toInt();
+        if (fps < 1)  fps = 1;
+        if (fps > 15) fps = 15;
+    }
+
+    if (recordingHandler.startRecording(fps)) {
+        server.send(200, "application/json", "{\"success\":true}");
+    } else {
+        server.send(500, "application/json", "{\"success\":false,\"error\":\"No se pudo iniciar grabacion\"}");
+    }
+}
+
+void CameraWebServer::handleStopRecording() {
+    sleepManager.registerActivity();
+
+    String filename = recordingHandler.getCurrentFilename();
+    filename = filename.substring(filename.lastIndexOf('/') + 1);
+
+    if (recordingHandler.stopRecording()) {
+        server.send(200, "application/json",
+                    "{\"success\":true,\"filename\":\"" + filename + "\"}");
+    } else {
+        server.send(400, "application/json",
+                    "{\"success\":false,\"error\":\"No hay grabacion activa\"}");
+    }
+}
+
+void CameraWebServer::handleRecordingStatus() {
+    server.send(200, "application/json", recordingHandler.getStatusJSON());
+}
+
+void CameraWebServer::handleListRecordings() {
+    if (!sdCard.isInitialized()) {
+        server.send(200, "application/json", "[]");
+        return;
+    }
+    server.send(200, "application/json", recordingHandler.listRecordingsJSON());
+}
+
+void CameraWebServer::handleDownloadRecording() {
+    if (!server.hasArg("name")) {
+        server.send(400, "text/plain", "Falta parametro name");
+        return;
+    }
+
+    String name = server.arg("name");
+    if (name.indexOf("..") >= 0) {
+        server.send(400, "text/plain", "Nombre invalido");
+        return;
+    }
+
+    String path = "/" + String(RECORDINGS_FOLDER) + "/" + name;
+    if (!SD_MMC.exists(path)) {
+        server.send(404, "text/plain", "Grabacion no encontrada");
+        return;
+    }
+
+    File f = SD_MMC.open(path, FILE_READ);
+    if (!f) {
+        server.send(500, "text/plain", "Error al abrir archivo");
+        return;
+    }
+
+    // Streaming por chunks para soportar archivos grandes
+    size_t fileSize = f.size();
+    server.sendHeader("Content-Disposition", "attachment; filename=" + name);
+    server.setContentLength(fileSize);
+    server.send(200, "video/x-msvideo", "");
+
+    WiFiClient client = server.client();
+    uint8_t buf[1024];
+    while (f.available() && client.connected()) {
+        int len = f.read(buf, sizeof(buf));
+        if (len > 0) client.write(buf, len);
+    }
+    f.close();
+}
+
+void CameraWebServer::handleDeleteRecording() {
+    if (!server.hasArg("plain")) {
+        server.send(400, "application/json", "{\"error\":\"Sin datos\"}");
+        return;
+    }
+
+    StaticJsonDocument<256> doc;
+    DeserializationError error = deserializeJson(doc, server.arg("plain"));
+    if (error || !doc.containsKey("name")) {
+        server.send(400, "application/json", "{\"error\":\"JSON invalido\"}");
+        return;
+    }
+
+    String name = doc["name"].as<String>();
+    if (recordingHandler.deleteRecording(name)) {
+        server.send(200, "application/json", "{\"success\":true}");
+        Serial.printf("Grabacion eliminada: %s\n", name.c_str());
+    } else {
+        server.send(500, "application/json", "{\"error\":\"No se pudo eliminar\"}");
+    }
+}
+
+// ── Fin handlers de grabación ──────────────────────────────────────────────
+
 void CameraWebServer::handleGetSettings() {
     CameraSettings settings = camera.getSettings();
 
@@ -409,6 +535,59 @@ String CameraWebServer::generateDashboardHTML() {
             min-height: 100vh;
             color: #e0e0e0;
             padding: 20px;
+        }
+        .btn-record {
+            flex: 1;
+            min-width: 100px;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            background: linear-gradient(135deg, #ff2200, #aa1100);
+            color: #fff;
+            box-shadow: 0 0 10px rgba(255, 34, 0, 0.3);
+        }
+        .btn-record:hover { transform: translateY(-2px); box-shadow: 0 5px 25px rgba(255,34,0,0.5); }
+        .btn-record.active {
+            background: linear-gradient(135deg, #ff0000, #cc0000);
+            box-shadow: 0 0 10px rgba(255,0,0,0.6), 0 0 25px rgba(255,0,0,0.3);
+            animation: recPulse 1.2s ease-in-out infinite;
+        }
+        @keyframes recPulse {
+            0%,100% { box-shadow: 0 0 10px rgba(255,0,0,0.6), 0 0 25px rgba(255,0,0,0.3); }
+            50%      { box-shadow: 0 0 20px rgba(255,0,0,0.9), 0 0 40px rgba(255,0,0,0.5); }
+        }
+        .rec-status {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+            padding: 8px 12px;
+            background: rgba(255,0,0,0.1);
+            border: 1px solid rgba(255,0,0,0.3);
+            border-radius: 8px;
+            font-size: 0.85em;
+        }
+        .rec-dot {
+            width: 10px; height: 10px;
+            background: #ff0000;
+            border-radius: 50%;
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        .rec-fps-select {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(255,34,0,0.3);
+            background: rgba(10,10,30,0.8);
+            color: #e0e0e0;
+            font-size: 0.85em;
+            cursor: pointer;
         }
         .container { max-width: 1200px; margin: 0 auto; }
         h1 {
@@ -766,6 +945,20 @@ String CameraWebServer::generateDashboardHTML() {
                     </button>
                     <button class="btn btn-success" onclick="capturePhoto()">Capturar Foto</button>
                 </div>
+                <div class="btn-group" style="margin-top:10px;align-items:center;">
+                    <button class="btn-record" id="recBtn" onclick="toggleRecording()">&#9210; Grabar</button>
+                    <select class="rec-fps-select" id="recFps">
+                        <option value="5">5 FPS</option>
+                        <option value="10" selected>10 FPS</option>
+                        <option value="15">15 FPS</option>
+                    </select>
+                </div>
+                <div class="rec-status" id="recStatus">
+                    <div class="rec-dot"></div>
+                    <span style="color:#ff4444;font-weight:600;">REC</span>
+                    <span id="recTime" style="color:#e0e0e0;">0:00 | 0 frames</span>
+                    <span id="recFile" style="color:#555;font-size:0.8em;margin-left:4px;"></span>
+                </div>
             </div>
 
             <div class="card">
@@ -901,6 +1094,20 @@ String CameraWebServer::generateDashboardHTML() {
                 </div>
                 <div class="btn-group" style="margin-top: 20px;">
                     <button class="btn btn-primary" onclick="loadStatus()">Actualizar Estado</button>
+                </div>
+            </div>
+
+            <div class="card" style="grid-column: 1 / -1;">
+                <h2>Grabaciones de Video</h2>
+                <p style="color:#888;font-size:0.82em;margin-bottom:12px;">
+                    Los videos se graban en formato AVI/MJPEG y se guardan en la carpeta <code style="color:#0ff;">grabaciones/</code>.
+                    Descargalos desde aqui y reproducilos con VLC u otro reproductor.
+                </p>
+                <div id="recordingsList" style="max-height:280px;overflow-y:auto;padding-right:5px;">
+                    <p style="color:#888;text-align:center;">Cargando...</p>
+                </div>
+                <div class="btn-group" style="margin-top:15px;">
+                    <button class="btn btn-success" onclick="loadRecordings()">Actualizar Lista</button>
                 </div>
             </div>
 
@@ -1293,11 +1500,165 @@ String CameraWebServer::generateDashboardHTML() {
             }
         }
 
+        // ── Grabación de video ────────────────────────────────────────
+        let recording = false;
+        let recordingPollTimer = null;
+
+        async function toggleRecording() {
+            if (recording) {
+                await stopRecording();
+            } else {
+                await startRecording();
+            }
+        }
+
+        async function startRecording() {
+            const fps = parseInt(document.getElementById('recFps').value);
+            // Si el stream está activo, detenerlo primero
+            if (streaming) {
+                const img = document.getElementById('stream');
+                const btn = document.getElementById('streamBtn');
+                streaming = false;
+                img.src = '';
+                const parent = img.parentNode;
+                const newImg = document.createElement('img');
+                newImg.id = 'stream';
+                newImg.alt = 'Stream';
+                parent.replaceChild(newImg, img);
+                btn.textContent = 'Iniciar Stream';
+                await new Promise(r => setTimeout(r, 400));
+            }
+            try {
+                const resp = await fetch('/recording/start?fps=' + fps);
+                const data = await resp.json();
+                if (data.success) {
+                    recording = true;
+                    document.getElementById('recBtn').textContent = '\u23F9 Detener Grabacion';
+                    document.getElementById('recBtn').classList.add('active');
+                    document.getElementById('recStatus').style.display = 'flex';
+                    document.getElementById('recFps').disabled = true;
+                    recordingPollTimer = setInterval(pollRecordingStatus, 1000);
+                    showToast('Grabacion iniciada a ' + fps + ' FPS');
+                } else {
+                    showToast('Error: ' + (data.error || 'No se pudo grabar'));
+                }
+            } catch(e) {
+                showToast('Error al iniciar grabacion');
+            }
+        }
+
+        async function stopRecording() {
+            try {
+                const resp = await fetch('/recording/stop');
+                const data = await resp.json();
+                clearInterval(recordingPollTimer);
+                recording = false;
+                document.getElementById('recBtn').textContent = '\u23FA Grabar';
+                document.getElementById('recBtn').classList.remove('active');
+                document.getElementById('recStatus').style.display = 'none';
+                document.getElementById('recFps').disabled = false;
+                if (data.success) {
+                    showToast('Video guardado: ' + (data.filename || ''));
+                    loadRecordings();
+                } else {
+                    showToast(data.error || 'Error al detener');
+                }
+            } catch(e) {
+                showToast('Error al detener grabacion');
+            }
+        }
+
+        async function pollRecordingStatus() {
+            try {
+                const resp = await fetch('/recording/status');
+                const data = await resp.json();
+                if (data.recording) {
+                    const mins = Math.floor(data.elapsed / 60);
+                    const secs = data.elapsed % 60;
+                    document.getElementById('recTime').textContent =
+                        mins + ':' + secs.toString().padStart(2, '0') +
+                        ' | ' + data.frames + ' frames';
+                    if (data.filename) {
+                        document.getElementById('recFile').textContent = data.filename;
+                    }
+                } else if (recording) {
+                    // Auto-detenida (tiempo maximo o SD llena)
+                    clearInterval(recordingPollTimer);
+                    recording = false;
+                    document.getElementById('recBtn').textContent = '\u23FA Grabar';
+                    document.getElementById('recBtn').classList.remove('active');
+                    document.getElementById('recStatus').style.display = 'none';
+                    document.getElementById('recFps').disabled = false;
+                    showToast('Grabacion finalizada automaticamente');
+                    loadRecordings();
+                }
+            } catch(e) {}
+        }
+
+        function formatRecordingName(name) {
+            // REC_YYYY-MM-DD_HH-MM-SS.avi  →  DD/MM/YYYY HH:MM:SS
+            if (name.startsWith('REC_') && name.length >= 23) {
+                var d = name.substring(4);
+                return d.substring(8,10)+'/'+d.substring(5,7)+'/'+d.substring(0,4)+
+                       ' '+d.substring(11,13)+':'+d.substring(14,16)+':'+d.substring(17,19);
+            }
+            return name;
+        }
+
+        async function loadRecordings() {
+            try {
+                const resp = await fetch('/recordings');
+                const recs = await resp.json();
+                const container = document.getElementById('recordingsList');
+                if (!recs || recs.length === 0) {
+                    container.innerHTML = '<p style="color:#888;text-align:center;">No hay grabaciones guardadas</p>';
+                    return;
+                }
+                let html = '';
+                recs.forEach(r => {
+                    const sizeMB = (r.size / (1024*1024)).toFixed(1);
+                    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 5px;border-bottom:1px solid rgba(255,34,0,0.1);">';
+                    html += '<div style="flex:1;overflow:hidden;min-width:0;">';
+                    html += '<div style="color:#ff8866;font-size:0.85em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">';
+                    html += '&#9210; ' + formatRecordingName(r.name) + ' <span style="color:#888;">(' + sizeMB + ' MB)</span></div>';
+                    html += '<div style="color:#555;font-size:0.7em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + r.name + '</div>';
+                    html += '</div>';
+                    html += '<div style="display:flex;gap:5px;flex-shrink:0;margin-left:10px;">';
+                    html += '<a href="/recording?name=' + encodeURIComponent(r.name) + '" download="' + r.name + '" ';
+                    html += 'style="padding:5px 12px;background:linear-gradient(135deg,#e0ff00,#aacc00);color:#000;border:none;border-radius:5px;cursor:pointer;font-size:0.8em;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;">Descargar</a>';
+                    html += '<button onclick="deleteRecording(\'' + r.name + '\')" style="padding:5px 10px;background:linear-gradient(135deg,#ff0055,#aa0033);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:0.8em;font-weight:600;">Eliminar</button>';
+                    html += '</div></div>';
+                });
+                container.innerHTML = html;
+            } catch(e) {
+                console.error('Error loading recordings:', e);
+            }
+        }
+
+        async function deleteRecording(name) {
+            if (!confirm('Eliminar grabacion ' + name + '?')) return;
+            try {
+                const resp = await fetch('/recording/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name })
+                });
+                if (resp.ok) {
+                    showToast('Grabacion eliminada');
+                    loadRecordings();
+                }
+            } catch(e) {
+                showToast('Error al eliminar');
+            }
+        }
+        // ── Fin grabación ─────────────────────────────────────────────
+
         // Cargar configuracion al inicio
         loadSettings();
         loadStatus();
         loadFolders();
         loadPhotos();
+        loadRecordings();
 
         // Actualizar estado cada 5 segundos
         setInterval(loadStatus, 5000);

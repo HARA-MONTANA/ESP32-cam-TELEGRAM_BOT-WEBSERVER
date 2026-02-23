@@ -70,6 +70,14 @@
 #define NTP_SYNC_INTERVAL 3600000      // Sincronizar hora cada hora
 
 // ============================================
+// CONFIGURACIÓN MODO SLEEP / AHORRO DE ENERGÍA
+// ============================================
+// En modo sleep: WiFi modem sleep activado + polling de Telegram reducido
+// Ahorro estimado: ~40-50% de consumo energético en reposo
+#define SLEEP_INACTIVITY_TIMEOUT_DEFAULT 600000UL  // 10 min de inactividad → sleep
+#define SLEEP_TELEGRAM_INTERVAL          10000UL   // Poll Telegram cada 10s en sleep
+
+// ============================================
 // NTP CONFIGURACIÓN
 // ============================================
 #define NTP_SERVER "pool.ntp.org"

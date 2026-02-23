@@ -2,6 +2,7 @@
 #include "camera_handler.h"
 #include "sd_handler.h"
 #include "config.h"
+#include "sleep_manager.h"
 #include "esp_camera.h"
 #include <time.h>
 
@@ -38,10 +39,12 @@ void CameraWebServer::handleClient() {
 }
 
 void CameraWebServer::handleRoot() {
+    sleepManager.registerActivity();
     server.send(200, "text/html", generateDashboardHTML());
 }
 
 void CameraWebServer::handleCapture() {
+    sleepManager.registerActivity();
     camera_fb_t* fb = camera.capturePhoto();
     if (!fb) {
         server.send(500, "text/plain", "Error al capturar imagen");
@@ -54,6 +57,7 @@ void CameraWebServer::handleCapture() {
 }
 
 void CameraWebServer::handleStream() {
+    sleepManager.registerActivity();
     WiFiClient client = server.client();
 
     String response = "HTTP/1.1 200 OK\r\n";
@@ -103,6 +107,7 @@ void CameraWebServer::handleStream() {
 }
 
 void CameraWebServer::handleWebCapture() {
+    sleepManager.registerActivity();
     camera_fb_t* fb = camera.capturePhoto();
     if (!fb) {
         server.send(500, "text/plain", "Error al capturar imagen");

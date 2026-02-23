@@ -29,6 +29,7 @@
 #include "web_server.h"
 #include "telegram_bot.h"
 #include "sd_handler.h"
+#include "sleep_manager.h"
 
 // Variables para control de tiempo
 unsigned long lastNTPSync = 0;
@@ -109,6 +110,9 @@ void setup() {
     // Inicializar bot de Telegram
     telegramBot.init();
 
+    // Inicializar modo sleep
+    sleepManager.begin();
+
     // Sistema listo
     systemReady = true;
     Serial.println("\n================================");
@@ -127,10 +131,14 @@ void setup() {
 void loop() {
     if (!systemReady) return;
 
-    // Manejar servidor web
+    // Verificar auto-sleep por inactividad
+    sleepManager.checkAutoSleep();
+
+    // Manejar servidor web (siempre activo; las conexiones despiertan el sistema)
     webServer.handleClient();
 
     // Manejar mensajes de Telegram
+    // (en modo sleep el checkInterval es mayor → menos polling)
     telegramBot.handleMessages();
 
     // Verificar si es hora de la foto del dia

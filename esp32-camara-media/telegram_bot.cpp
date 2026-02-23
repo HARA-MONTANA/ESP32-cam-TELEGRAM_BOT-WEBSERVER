@@ -3,6 +3,7 @@
 #include "sd_handler.h"
 #include "config.h"
 #include "credentials_manager.h"
+#include "sleep_manager.h"
 #include <WiFi.h>
 #include <Preferences.h>
 
@@ -160,6 +161,9 @@ void TelegramBot::processMessage(telegramMessage& msg) {
         Serial.println("Intento de acceso no autorizado desde: " + chatId + " (" + fromUser + ")");
         return;
     }
+
+    // Cualquier mensaje autorizado reinicia el temporizador de inactividad
+    sleepManager.registerActivity();
 
     // Procesar comandos
     if (text.startsWith("/")) {
@@ -542,6 +546,77 @@ void TelegramBot::handleCommand(String command, String chatId) {
     else if (command == "/myid") {
         bot->sendMessage(chatId, "Tu ID: " + chatId, "");
     }
+    // ----- MODO SLEEP -----
+    else if (command == "/dormir" || command == "/sleep" ||
+             command.startsWith("/dormir ") || command.startsWith("/sleep ")) {
+        // Argumento opcional: minutos de timeout de inactividad
+        int spaceIndex = command.indexOf(' ');
+        if (spaceIndex > 0) {
+            String args = originalCommand.substring(spaceIndex + 1);
+            args.trim();
+            int mins = args.toInt();
+            if (mins < 0 || mins > 1440) {
+                bot->sendMessage(chatId, "Valor invalido. Usa /dormir N (0-1440 minutos).", "");
+                return;
+            }
+            sleepManager.setTimeout(mins == 0 ? 0 : (unsigned long)mins * 60000UL);
+            sleepManager.saveTimeout();
+        }
+        String msg = "Entrando en modo sleep.\n";
+        msg += "Consumo reducido. Poll Telegram cada " + String(sleepManager.getSleepPollInterval() / 1000UL) + " s.\n";
+        msg += "Escribe cualquier comando o conéctate al dashboard para activarme.";
+        bot->sendMessage(chatId, msg, "");
+        sleepManager.enterSleep();
+    }
+    else if (command == "/despertar" || command == "/wake") {
+        if (sleepManager.isSleeping()) {
+            sleepManager.exitSleep();
+            bot->sendMessage(chatId, "Sistema activo!\n\n" + sleepManager.getStatus(), "");
+        } else {
+            bot->sendMessage(chatId, "Ya estoy activo.\n\n" + sleepManager.getStatus(), "");
+        }
+    }
+    else if (command == "/sleepconfig" || command.startsWith("/sleepconfig ")) {
+        int spaceIndex = command.indexOf(' ');
+        if (spaceIndex < 0) {
+            // Sin argumentos: mostrar config actual
+            bot->sendMessage(chatId, sleepManager.getStatus(), "");
+        } else {
+            String args = originalCommand.substring(spaceIndex + 1);
+            args.trim();
+            String argsLower = args;
+            argsLower.toLowerCase();
+
+            if (argsLower.startsWith("poll ")) {
+                // /sleepconfig poll N → cambiar intervalo de poll en sleep (segundos)
+                String pollArg = args.substring(5);
+                pollArg.trim();
+                int secs = pollArg.toInt();
+                if (secs < 1 || secs > 300) {
+                    bot->sendMessage(chatId, "Valor invalido. Usa /sleepconfig poll N (1-300 segundos).", "");
+                } else {
+                    sleepManager.setSleepPollInterval((unsigned long)secs * 1000UL);
+                    sleepManager.saveSleepPollInterval();
+                    bot->sendMessage(chatId, "Poll de Telegram en sleep: " + String(secs) + " s\n\n" + sleepManager.getStatus(), "");
+                }
+            } else if (argsLower == "off" || argsLower == "0") {
+                // /sleepconfig off o /sleepconfig 0 → desactivar auto-sleep
+                sleepManager.setTimeout(0);
+                sleepManager.saveTimeout();
+                bot->sendMessage(chatId, "Auto-sleep desactivado.\n\n" + sleepManager.getStatus(), "");
+            } else {
+                // /sleepconfig N → timeout de inactividad en minutos
+                int mins = args.toInt();
+                if (mins < 1 || mins > 1440) {
+                    bot->sendMessage(chatId, "Uso:\n/sleepconfig - Ver estado\n/sleepconfig N - Timeout (1-1440 min)\n/sleepconfig off - Desactivar auto-sleep\n/sleepconfig poll N - Poll en sleep (1-300 s)", "");
+                } else {
+                    sleepManager.setTimeout((unsigned long)mins * 60000UL);
+                    sleepManager.saveTimeout();
+                    bot->sendMessage(chatId, "Timeout de inactividad: " + String(mins) + " min\n\n" + sleepManager.getStatus(), "");
+                }
+            }
+        }
+    }
     else {
         bot->sendMessage(chatId, "Comando no reconocido. Usa /ayuda", "");
     }
@@ -580,7 +655,16 @@ void TelegramBot::sendHelpMessage(String chatId) {
     helpMsg += "/estado - Ver estado del sistema\n";
     helpMsg += "/stream - Ver enlace de streaming\n";
     helpMsg += "/ip - Ver direccion IP\n";
-    helpMsg += "/reiniciar - Reiniciar ESP32-CAM";
+    helpMsg += "/reiniciar - Reiniciar ESP32-CAM\n\n";
+
+    helpMsg += "AHORRO DE ENERGIA:\n";
+    helpMsg += "/dormir - Entrar en modo sleep\n";
+    helpMsg += "/dormir N - Sleep y cambiar timeout a N min\n";
+    helpMsg += "/despertar - Salir del modo sleep\n";
+    helpMsg += "/sleepconfig - Ver configuracion de sleep\n";
+    helpMsg += "/sleepconfig N - Timeout inactividad (min)\n";
+    helpMsg += "/sleepconfig off - Desactivar auto-sleep\n";
+    helpMsg += "/sleepconfig poll N - Poll en sleep (seg)";
 
     bot->sendMessage(chatId, helpMsg, "");
 }
@@ -618,7 +702,10 @@ void TelegramBot::sendStatusMessage(String chatId) {
     status += "\nFoto Diaria (a las " + String(dailyConfig.hour) + ":" +
               (dailyConfig.minute < 10 ? "0" : "") + String(dailyConfig.minute) + "):\n";
     status += "Envio Telegram: " + String(dailyConfig.enabled ? "ON" : "OFF") + "\n";
-    status += "Guardar SD: SIEMPRE";
+    status += "Guardar SD: SIEMPRE\n";
+
+    // Modo sleep
+    status += "\n" + sleepManager.getStatus();
 
     bot->sendMessage(chatId, status, "");
 }

@@ -202,32 +202,51 @@ void loop() {
     }
 }
 
-// Intenta conectar a WiFi una vez. Retorna true si conecta, false si no.
+// Intenta conectar a WiFi probando todas las redes guardadas en orden circular.
+// El criterio de éxito es WL_CONNECTED (IP obtenida del router).
+// No se verifica internet para no cambiar de red ante cortes temporales.
 bool connectWiFi() {
-    WiFi.disconnect(true);
-    delay(100);
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(credentialsManager.getWifiSSID().c_str(),
-               credentialsManager.getWifiPassword().c_str());
-
-    Serial.print("Conectando a ");
-    Serial.print(credentialsManager.getWifiSSID());
-
-    unsigned long startTime = millis();
-    while (WiFi.status() != WL_CONNECTED && (millis() - startTime < WIFI_CONNECT_TIMEOUT)) {
-        delay(500);
-        Serial.print(".");
+    int count = credentialsManager.getNetworkCount();
+    if (count == 0) {
+        Serial.println("No hay redes WiFi guardadas.");
+        return false;
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\nWiFi conectado!");
-        Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
-        Serial.printf("RSSI: %d dBm\n\n", WiFi.RSSI());
-        wifiRetryCount = 0;
-        return true;
+    int startIdx = credentialsManager.getActiveNetworkIndex();
+
+    for (int attempt = 0; attempt < count; attempt++) {
+        int idx = (startIdx + attempt) % count;
+        WiFiEntry net = credentialsManager.getNetwork(idx);
+        if (net.ssid.length() == 0) continue;
+
+        WiFi.disconnect(true);
+        delay(100);
+        WiFi.mode(WIFI_STA);
+        WiFi.begin(net.ssid.c_str(), net.password.c_str());
+        Serial.printf("Conectando a '%s'", net.ssid.c_str());
+
+        unsigned long startTime = millis();
+        while (WiFi.status() != WL_CONNECTED && (millis() - startTime < WIFI_CONNECT_TIMEOUT)) {
+            delay(500);
+            Serial.print(".");
+        }
+
+        if (WiFi.status() == WL_CONNECTED) {
+            credentialsManager.setActiveNetworkIndex(idx);
+            wifiRetryCount = 0;
+            Serial.printf("\nConectado a '%s'. IP: %s | RSSI: %d dBm\n",
+                          net.ssid.c_str(),
+                          WiFi.localIP().toString().c_str(),
+                          WiFi.RSSI());
+            return true;
+        }
+
+        Serial.printf("\nNo se pudo conectar a '%s'", net.ssid.c_str());
+        if (count > 1) Serial.print(", probando siguiente...");
+        Serial.println();
     }
 
-    Serial.println("\nNo se pudo conectar a WiFi.");
+    Serial.println("Ninguna red WiFi disponible.");
     return false;
 }
 

@@ -10,6 +10,8 @@ CredentialsManager::CredentialsManager() : credentialsLoaded(false) {
     credentials.wifiPassword = "";
     credentials.botToken = "";
     credentials.gmtOffsetSec = -18000; // UTC-5 por defecto
+    wifiNetworkCount = 0;
+    activeNetworkIndex = 0;
 }
 
 void CredentialsManager::init() {
@@ -26,9 +28,7 @@ bool CredentialsManager::isBypassButtonPressed() {
 }
 
 bool CredentialsManager::hasStoredCredentials() {
-    return credentials.wifiSSID.length() > 0 &&
-           credentials.wifiPassword.length() > 0 &&
-           credentials.botToken.length() > 0;
+    return wifiNetworkCount > 0 && credentials.botToken.length() > 0;
 }
 
 void CredentialsManager::loadCredentials() {
@@ -38,6 +38,17 @@ void CredentialsManager::loadCredentials() {
     credentials.botToken = credPrefs.getString("botToken", "");
     credentials.gmtOffsetSec = credPrefs.getLong("gmtOffset", -18000);
     credPrefs.end();
+
+    // Migrar red única legacy a sistema multi-red, luego cargar todas las redes
+    migrateFromSingleNetwork();
+    loadWiFiNetworks();
+
+    // Sincronizar credentials.wifiSSID con la red 0 para que el flujo serial
+    // siga mostrando el SSID guardado correctamente
+    if (wifiNetworkCount > 0) {
+        credentials.wifiSSID    = wifiNetworks[0].ssid;
+        credentials.wifiPassword = wifiNetworks[0].password;
+    }
 
     credentialsLoaded = true;
 
@@ -56,7 +67,141 @@ void CredentialsManager::saveCredentials() {
     credPrefs.putLong("gmtOffset", credentials.gmtOffsetSec);
     credPrefs.end();
 
+    // Reflejar la red del serial setup en el slot 0 del sistema multi-red
+    if (credentials.wifiSSID.length() > 0) {
+        if (wifiNetworkCount == 0) {
+            wifiNetworks[0].ssid     = credentials.wifiSSID;
+            wifiNetworks[0].password = credentials.wifiPassword;
+            wifiNetworkCount = 1;
+        } else {
+            wifiNetworks[0].ssid     = credentials.wifiSSID;
+            wifiNetworks[0].password = credentials.wifiPassword;
+        }
+        saveWiFiNetworks();
+    }
+
     Serial.println("Credenciales guardadas en memoria.");
+}
+
+// ── Multi-WiFi: migración, carga y guardado ──────────────────────────────────
+
+void CredentialsManager::migrateFromSingleNetwork() {
+    credPrefs.begin("credentials", true);
+    bool hasLegacySsid = credPrefs.isKey("ssid");
+    bool hasMultiKey   = credPrefs.isKey("wf_count");
+    String legacySsid  = credPrefs.getString("ssid", "");
+    String legacyPass  = credPrefs.getString("password", "");
+    credPrefs.end();
+
+    if (hasLegacySsid && !hasMultiKey && legacySsid.length() > 0) {
+        Serial.println("Migrando red WiFi legacy al sistema multi-red...");
+        credPrefs.begin("credentials", false);
+        credPrefs.putString("wf0_ssid", legacySsid);
+        credPrefs.putString("wf0_pass", legacyPass);
+        credPrefs.putInt("wf_count",  1);
+        credPrefs.putInt("wf_active", 0);
+        credPrefs.end();
+        Serial.printf("  Red migrada: %s\n", legacySsid.c_str());
+    }
+}
+
+void CredentialsManager::loadWiFiNetworks() {
+    credPrefs.begin("credentials", true);
+    int count = credPrefs.getInt("wf_count", 0);
+    int active = credPrefs.getInt("wf_active", 0);
+    credPrefs.end();
+
+    if (count < 0) count = 0;
+    if (count > MAX_WIFI_NETWORKS) count = MAX_WIFI_NETWORKS;
+    if (active < 0 || active >= count) active = 0;
+
+    wifiNetworkCount  = count;
+    activeNetworkIndex = active;
+
+    credPrefs.begin("credentials", true);
+    for (int i = 0; i < wifiNetworkCount; i++) {
+        String keyS = "wf" + String(i) + "_ssid";
+        String keyP = "wf" + String(i) + "_pass";
+        wifiNetworks[i].ssid     = credPrefs.getString(keyS.c_str(), "");
+        wifiNetworks[i].password = credPrefs.getString(keyP.c_str(), "");
+    }
+    credPrefs.end();
+}
+
+void CredentialsManager::saveWiFiNetworks() {
+    credPrefs.begin("credentials", false);
+    credPrefs.putInt("wf_count",  wifiNetworkCount);
+    credPrefs.putInt("wf_active", activeNetworkIndex);
+    for (int i = 0; i < wifiNetworkCount; i++) {
+        credPrefs.putString(("wf" + String(i) + "_ssid").c_str(), wifiNetworks[i].ssid);
+        credPrefs.putString(("wf" + String(i) + "_pass").c_str(), wifiNetworks[i].password);
+    }
+    credPrefs.end();
+}
+
+// ── Getters y setters multi-red ───────────────────────────────────────────────
+
+int CredentialsManager::getNetworkCount() {
+    return wifiNetworkCount;
+}
+
+int CredentialsManager::getActiveNetworkIndex() {
+    return activeNetworkIndex;
+}
+
+WiFiEntry CredentialsManager::getNetwork(int index) {
+    if (index < 0 || index >= wifiNetworkCount) {
+        WiFiEntry empty;
+        return empty;
+    }
+    return wifiNetworks[index];
+}
+
+bool CredentialsManager::addNetwork(const String& ssid, const String& password) {
+    if (wifiNetworkCount >= MAX_WIFI_NETWORKS) return false;
+    if (ssid.length() == 0) return false;
+    wifiNetworks[wifiNetworkCount].ssid     = ssid;
+    wifiNetworks[wifiNetworkCount].password = password;
+    wifiNetworkCount++;
+    saveWiFiNetworks();
+    Serial.printf("Red WiFi añadida [%d]: %s\n", wifiNetworkCount - 1, ssid.c_str());
+    return true;
+}
+
+bool CredentialsManager::updateNetwork(int index, const String& ssid, const String& password) {
+    if (index < 0 || index >= wifiNetworkCount) return false;
+    if (ssid.length() == 0) return false;
+    wifiNetworks[index].ssid     = ssid;
+    wifiNetworks[index].password = password;
+    saveWiFiNetworks();
+    Serial.printf("Red WiFi actualizada [%d]: %s\n", index, ssid.c_str());
+    return true;
+}
+
+bool CredentialsManager::deleteNetwork(int index) {
+    if (index < 0 || index >= wifiNetworkCount) return false;
+    // Desplazar redes hacia arriba para llenar el hueco
+    for (int i = index; i < wifiNetworkCount - 1; i++) {
+        wifiNetworks[i] = wifiNetworks[i + 1];
+    }
+    wifiNetworks[wifiNetworkCount - 1].ssid     = "";
+    wifiNetworks[wifiNetworkCount - 1].password = "";
+    wifiNetworkCount--;
+    // Ajustar índice activo si quedó fuera de rango
+    if (activeNetworkIndex >= wifiNetworkCount && wifiNetworkCount > 0) {
+        activeNetworkIndex = wifiNetworkCount - 1;
+    } else if (wifiNetworkCount == 0) {
+        activeNetworkIndex = 0;
+    }
+    saveWiFiNetworks();
+    Serial.printf("Red WiFi eliminada [%d]. Redes restantes: %d\n", index, wifiNetworkCount);
+    return true;
+}
+
+void CredentialsManager::setActiveNetworkIndex(int index) {
+    if (index < 0 || index >= wifiNetworkCount) return;
+    activeNetworkIndex = index;
+    saveWiFiNetworks();
 }
 
 String CredentialsManager::readSerialLineWithTimeout(unsigned long timeout, bool* buttonPressed) {
@@ -287,10 +432,16 @@ bool CredentialsManager::requestCredentials() {
 }
 
 String CredentialsManager::getWifiSSID() {
+    if (wifiNetworkCount > 0 && activeNetworkIndex < wifiNetworkCount) {
+        return wifiNetworks[activeNetworkIndex].ssid;
+    }
     return credentials.wifiSSID;
 }
 
 String CredentialsManager::getWifiPassword() {
+    if (wifiNetworkCount > 0 && activeNetworkIndex < wifiNetworkCount) {
+        return wifiNetworks[activeNetworkIndex].password;
+    }
     return credentials.wifiPassword;
 }
 

@@ -2,10 +2,12 @@
 #include "camera_handler.h"
 #include "sd_handler.h"
 #include "recording_handler.h"
+#include "credentials_manager.h"
 #include "config.h"
 #include "sleep_manager.h"
 #include "esp_camera.h"
 #include <time.h>
+#include <WiFi.h>
 
 CameraWebServer webServer(WEB_SERVER_PORT);
 
@@ -32,6 +34,13 @@ void CameraWebServer::init() {
     server.on("/recordings",       HTTP_GET,  [this]() { handleListRecordings(); });
     server.on("/recording",        HTTP_GET,  [this]() { handleDownloadRecording(); });
     server.on("/recording/delete", HTTP_POST, [this]() { handleDeleteRecording(); });
+
+    // Rutas de gestión WiFi
+    server.on("/wifi/networks", HTTP_GET,  [this]() { handleGetWiFiNetworks(); });
+    server.on("/wifi/add",      HTTP_POST, [this]() { handleAddWiFiNetwork(); });
+    server.on("/wifi/update",   HTTP_POST, [this]() { handleUpdateWiFiNetwork(); });
+    server.on("/wifi/delete",   HTTP_POST, [this]() { handleDeleteWiFiNetwork(); });
+    server.on("/wifi/status",   HTTP_GET,  [this]() { handleGetWiFiStatus(); });
 
     server.onNotFound([this]() { handleNotFound(); });
 
@@ -515,6 +524,112 @@ void CameraWebServer::handleStatus() {
     serializeJson(doc, output);
     server.send(200, "application/json", output);
 }
+
+// ── Gestión de redes WiFi ─────────────────────────────────────────────────────
+
+void CameraWebServer::handleGetWiFiNetworks() {
+    int count = credentialsManager.getNetworkCount();
+    int active = credentialsManager.getActiveNetworkIndex();
+
+    DynamicJsonDocument doc(512);
+    JsonArray arr = doc.to<JsonArray>();
+    for (int i = 0; i < count; i++) {
+        WiFiEntry net = credentialsManager.getNetwork(i);
+        JsonObject obj = arr.createNestedObject();
+        obj["index"]  = i;
+        obj["ssid"]   = net.ssid;
+        obj["active"] = (i == active);
+    }
+    String output;
+    serializeJson(doc, output);
+    server.send(200, "application/json", output);
+}
+
+void CameraWebServer::handleAddWiFiNetwork() {
+    if (!server.hasArg("plain")) {
+        server.send(400, "application/json", "{\"error\":\"Sin datos\"}");
+        return;
+    }
+    StaticJsonDocument<256> doc;
+    if (deserializeJson(doc, server.arg("plain")) || !doc.containsKey("ssid")) {
+        server.send(400, "application/json", "{\"error\":\"JSON invalido\"}");
+        return;
+    }
+    String ssid     = doc["ssid"].as<String>();
+    String password = doc.containsKey("password") ? doc["password"].as<String>() : "";
+    ssid.trim();
+    if (ssid.length() == 0 || ssid.length() > 32) {
+        server.send(400, "application/json", "{\"error\":\"SSID invalido\"}");
+        return;
+    }
+    if (password.length() > 63) {
+        server.send(400, "application/json", "{\"error\":\"Password demasiado larga\"}");
+        return;
+    }
+    if (!credentialsManager.addNetwork(ssid, password)) {
+        server.send(400, "application/json", "{\"error\":\"Maximo de redes alcanzado\"}");
+        return;
+    }
+    server.send(200, "application/json", "{\"success\":true}");
+}
+
+void CameraWebServer::handleUpdateWiFiNetwork() {
+    if (!server.hasArg("plain")) {
+        server.send(400, "application/json", "{\"error\":\"Sin datos\"}");
+        return;
+    }
+    StaticJsonDocument<256> doc;
+    if (deserializeJson(doc, server.arg("plain")) || !doc.containsKey("index") || !doc.containsKey("ssid")) {
+        server.send(400, "application/json", "{\"error\":\"JSON invalido\"}");
+        return;
+    }
+    int index       = doc["index"].as<int>();
+    String ssid     = doc["ssid"].as<String>();
+    String password = doc.containsKey("password") ? doc["password"].as<String>() : "";
+    ssid.trim();
+    if (ssid.length() == 0 || ssid.length() > 32) {
+        server.send(400, "application/json", "{\"error\":\"SSID invalido\"}");
+        return;
+    }
+    if (!credentialsManager.updateNetwork(index, ssid, password)) {
+        server.send(400, "application/json", "{\"error\":\"Indice invalido\"}");
+        return;
+    }
+    server.send(200, "application/json", "{\"success\":true}");
+}
+
+void CameraWebServer::handleDeleteWiFiNetwork() {
+    if (!server.hasArg("plain")) {
+        server.send(400, "application/json", "{\"error\":\"Sin datos\"}");
+        return;
+    }
+    StaticJsonDocument<64> doc;
+    if (deserializeJson(doc, server.arg("plain")) || !doc.containsKey("index")) {
+        server.send(400, "application/json", "{\"error\":\"JSON invalido\"}");
+        return;
+    }
+    int index = doc["index"].as<int>();
+    if (!credentialsManager.deleteNetwork(index)) {
+        server.send(400, "application/json", "{\"error\":\"Indice invalido\"}");
+        return;
+    }
+    server.send(200, "application/json", "{\"success\":true}");
+}
+
+void CameraWebServer::handleGetWiFiStatus() {
+    bool connected = (WiFi.status() == WL_CONNECTED);
+    StaticJsonDocument<256> doc;
+    doc["connected"]   = connected;
+    doc["ssid"]        = connected ? WiFi.SSID() : "";
+    doc["ip"]          = connected ? WiFi.localIP().toString() : "";
+    doc["rssi"]        = connected ? WiFi.RSSI() : 0;
+    doc["activeIndex"] = credentialsManager.getActiveNetworkIndex();
+    String output;
+    serializeJson(doc, output);
+    server.send(200, "application/json", output);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 void CameraWebServer::handleNotFound() {
     server.send(404, "text/plain", "No encontrado");
@@ -1241,6 +1356,35 @@ String CameraWebServer::generateDashboardHTML() {
                     <button class="btn btn-success" onclick="loadPhotos()">Actualizar Lista</button>
                 </div>
             </div>
+
+            <!-- ── Card: Redes WiFi ──────────────────────────────────────── -->
+            <div class="card" style="grid-column: 1 / -1;">
+                <h2 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                    &#128246; Redes WiFi
+                    <span id="wifiStatusBadge" style="font-size:0.75em;padding:4px 12px;border-radius:20px;font-weight:600;letter-spacing:1px;background:rgba(255,0,0,0.15);border:1px solid rgba(255,0,0,0.3);color:#ff5555;">Verificando...</span>
+                </h2>
+
+                <!-- Lista de redes guardadas -->
+                <div id="wifiNetworkList" style="margin-bottom:20px;">
+                    <p style="color:#888;text-align:center;">Cargando redes...</p>
+                </div>
+
+                <!-- Formulario para añadir red -->
+                <div style="background:rgba(0,255,255,0.03);border:1px solid rgba(0,255,255,0.1);border-radius:10px;padding:15px;">
+                    <p style="color:#e0ff00;font-size:0.9em;font-weight:600;margin-bottom:12px;letter-spacing:1px;">&#43; AÑADIR RED</p>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                        <input id="newSsid" type="text" placeholder="Nombre de red (SSID)" maxlength="32"
+                               style="flex:1;min-width:140px;padding:9px 12px;background:rgba(10,10,30,0.8);border:1px solid rgba(0,255,255,0.3);border-radius:8px;color:#e0e0e0;font-size:0.9em;outline:none;">
+                        <div style="position:relative;flex:1;min-width:140px;">
+                            <input id="newPass" type="password" placeholder="Contraseña" maxlength="63"
+                                   style="width:100%;padding:9px 36px 9px 12px;background:rgba(10,10,30,0.8);border:1px solid rgba(0,255,255,0.3);border-radius:8px;color:#e0e0e0;font-size:0.9em;outline:none;">
+                            <button onclick="togglePass('newPass', this)" title="Mostrar/ocultar"
+                                    style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:#555;cursor:pointer;font-size:1em;padding:2px 4px;">&#128065;</button>
+                        </div>
+                        <button class="btn btn-success" onclick="addWifiNetwork()" style="flex:none;min-width:120px;">Guardar Red</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1798,15 +1942,163 @@ String CameraWebServer::generateDashboardHTML() {
         });
         loadBotLink();
 
+        // === Gestión de redes WiFi ===
+
+        function togglePass(inputId, btn) {
+            const inp = document.getElementById(inputId);
+            if (inp.type === 'password') { inp.type = 'text'; btn.style.color = '#0ff'; }
+            else                         { inp.type = 'password'; btn.style.color = '#555'; }
+        }
+
+        async function loadWifiStatus() {
+            try {
+                const r = await fetch('/wifi/status');
+                const d = await r.json();
+                const badge = document.getElementById('wifiStatusBadge');
+                if (d.connected) {
+                    badge.textContent = '\u2022 ' + d.ssid + ' \u2014 ' + d.ip;
+                    badge.style.background = 'rgba(0,255,0,0.1)';
+                    badge.style.borderColor = 'rgba(0,255,0,0.3)';
+                    badge.style.color = '#00ff88';
+                } else {
+                    badge.textContent = '\u25cb Desconectado';
+                    badge.style.background = 'rgba(255,0,0,0.1)';
+                    badge.style.borderColor = 'rgba(255,0,0,0.3)';
+                    badge.style.color = '#ff5555';
+                }
+            } catch(e) {}
+        }
+
+        async function loadWifiNetworks() {
+            try {
+                const r = await fetch('/wifi/networks');
+                const nets = await r.json();
+                const container = document.getElementById('wifiNetworkList');
+                if (nets.length === 0) {
+                    container.innerHTML = '<p style="color:#888;text-align:center;">No hay redes guardadas.</p>';
+                    return;
+                }
+                let html = '<div style="display:flex;flex-direction:column;gap:8px;">';
+                nets.forEach(n => {
+                    const activeBadge = n.active
+                        ? '<span style="font-size:0.75em;padding:2px 8px;background:rgba(0,255,136,0.15);border:1px solid rgba(0,255,136,0.3);color:#00ff88;border-radius:10px;font-weight:600;">ACTIVA</span>'
+                        : '';
+                    html += `<div id="wifiRow${n.index}" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(0,255,255,0.03);border:1px solid rgba(0,255,255,0.1);border-radius:8px;flex-wrap:wrap;">
+                        <span style="flex:1;min-width:100px;color:#e0e0e0;font-size:0.95em;">${n.ssid}</span>
+                        ${activeBadge}
+                        <button onclick="showEditForm(${n.index},'${n.ssid.replace(/'/g,"\\'")}')"
+                                style="padding:5px 12px;background:rgba(224,255,0,0.1);border:1px solid rgba(224,255,0,0.3);color:#e0ff00;border-radius:6px;cursor:pointer;font-size:0.8em;font-weight:600;">Editar</button>
+                        <button onclick="deleteWifiNetwork(${n.index},'${n.ssid.replace(/'/g,"\\'")}')"
+                                style="padding:5px 12px;background:rgba(255,0,85,0.1);border:1px solid rgba(255,0,85,0.3);color:#ff5588;border-radius:6px;cursor:pointer;font-size:0.8em;font-weight:600;">Eliminar</button>
+                    </div>
+                    <div id="editForm${n.index}" style="display:none;padding:12px 14px;background:rgba(0,255,255,0.03);border:1px solid rgba(224,255,0,0.2);border-radius:8px;flex-direction:column;gap:8px;">
+                        <p style="color:#e0ff00;font-size:0.8em;font-weight:600;margin-bottom:4px;">Editar red [${n.index}]</p>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                            <input id="editSsid${n.index}" type="text" value="${n.ssid}" maxlength="32" placeholder="SSID"
+                                   style="flex:1;min-width:120px;padding:8px 10px;background:rgba(10,10,30,0.8);border:1px solid rgba(0,255,255,0.3);border-radius:7px;color:#e0e0e0;font-size:0.9em;outline:none;">
+                            <div style="position:relative;flex:1;min-width:120px;">
+                                <input id="editPass${n.index}" type="password" placeholder="Nueva contraseña" maxlength="63"
+                                       style="width:100%;padding:8px 32px 8px 10px;background:rgba(10,10,30,0.8);border:1px solid rgba(0,255,255,0.3);border-radius:7px;color:#e0e0e0;font-size:0.9em;outline:none;">
+                                <button onclick="togglePass('editPass${n.index}',this)" title="Mostrar/ocultar"
+                                        style="position:absolute;right:5px;top:50%;transform:translateY(-50%);background:none;border:none;color:#555;cursor:pointer;font-size:0.9em;">&#128065;</button>
+                            </div>
+                            <button onclick="updateWifiNetwork(${n.index})"
+                                    style="padding:8px 14px;background:linear-gradient(135deg,#e0ff00,#aacc00);color:#000;border:none;border-radius:7px;cursor:pointer;font-size:0.85em;font-weight:600;">Guardar</button>
+                            <button onclick="hideEditForm(${n.index})"
+                                    style="padding:8px 10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#888;border-radius:7px;cursor:pointer;font-size:0.85em;">Cancelar</button>
+                        </div>
+                    </div>`;
+                });
+                html += '</div>';
+                container.innerHTML = html;
+            } catch(e) {
+                document.getElementById('wifiNetworkList').innerHTML = '<p style="color:#ff5555;text-align:center;">Error al cargar redes.</p>';
+            }
+        }
+
+        function showEditForm(index, ssid) {
+            document.getElementById('editForm' + index).style.display = 'flex';
+            document.getElementById('editForm' + index).style.flexDirection = 'column';
+        }
+
+        function hideEditForm(index) {
+            document.getElementById('editForm' + index).style.display = 'none';
+        }
+
+        async function addWifiNetwork() {
+            const ssid = document.getElementById('newSsid').value.trim();
+            const pass = document.getElementById('newPass').value;
+            if (!ssid) { showToast('Ingresa el nombre de la red'); return; }
+            try {
+                const r = await fetch('/wifi/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid: ssid, password: pass })
+                });
+                const d = await r.json();
+                if (d.success) {
+                    document.getElementById('newSsid').value = '';
+                    document.getElementById('newPass').value = '';
+                    showToast('Red \'' + ssid + '\' guardada');
+                    loadWifiNetworks();
+                } else {
+                    showToast(d.error || 'Error al guardar');
+                }
+            } catch(e) { showToast('Error al guardar red'); }
+        }
+
+        async function updateWifiNetwork(index) {
+            const ssid = document.getElementById('editSsid' + index).value.trim();
+            const pass = document.getElementById('editPass' + index).value;
+            if (!ssid) { showToast('El SSID no puede estar vacio'); return; }
+            try {
+                const r = await fetch('/wifi/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ index: index, ssid: ssid, password: pass })
+                });
+                const d = await r.json();
+                if (d.success) {
+                    showToast('Red actualizada');
+                    loadWifiNetworks();
+                    loadWifiStatus();
+                } else {
+                    showToast(d.error || 'Error al actualizar');
+                }
+            } catch(e) { showToast('Error al actualizar red'); }
+        }
+
+        async function deleteWifiNetwork(index, ssid) {
+            if (!confirm('Eliminar la red \'' + ssid + '\'?')) return;
+            try {
+                const r = await fetch('/wifi/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ index: index })
+                });
+                const d = await r.json();
+                if (d.success) {
+                    showToast('Red eliminada');
+                    loadWifiNetworks();
+                    loadWifiStatus();
+                } else {
+                    showToast(d.error || 'Error al eliminar');
+                }
+            } catch(e) { showToast('Error al eliminar red'); }
+        }
+
         // Cargar configuracion al inicio
         loadSettings();
         loadStatus();
         loadFolders();
         loadPhotos();
         loadRecordings();
+        loadWifiNetworks();
+        loadWifiStatus();
 
         // Actualizar estado cada 5 segundos
         setInterval(loadStatus, 5000);
+        setInterval(loadWifiStatus, 10000);
     </script>
 </body>
 </html>

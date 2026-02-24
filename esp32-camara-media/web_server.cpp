@@ -591,12 +591,97 @@ String CameraWebServer::generateDashboardHTML() {
             cursor: pointer;
         }
         .container { max-width: 1200px; margin: 0 auto; }
-        h1 {
-            text-align: center;
+        .site-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             margin-bottom: 30px;
+            padding: 15px 25px;
+            background: rgba(10, 10, 30, 0.85);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(0, 255, 255, 0.2);
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.08), inset 0 0 20px rgba(0, 255, 255, 0.02);
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .header-title {
             color: #0ff;
             text-shadow: 0 0 10px #0ff, 0 0 30px #0ff, 0 0 60px rgba(0, 255, 255, 0.3);
             letter-spacing: 2px;
+            font-size: 1.4em;
+            font-weight: 700;
+        }
+        .header-clock {
+            font-size: 1.6em;
+            font-weight: 700;
+            color: #e0ff00;
+            text-shadow: 0 0 10px rgba(224, 255, 0, 0.5), 0 0 25px rgba(224, 255, 0, 0.2);
+            letter-spacing: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        .header-bot {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .bot-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: linear-gradient(135deg, #0088cc, #005580);
+            color: #fff;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 0.9em;
+            font-weight: 600;
+            box-shadow: 0 0 10px rgba(0, 136, 204, 0.3);
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+        .bot-link:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(0, 136, 204, 0.5); }
+        .bot-edit-btn {
+            padding: 7px 10px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(0,255,255,0.2);
+            color: #0ff;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.3s ease;
+        }
+        .bot-edit-btn:hover { background: rgba(0,255,255,0.1); }
+        .bot-input {
+            padding: 8px 12px;
+            background: rgba(10,10,30,0.8);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 0.9em;
+            width: 160px;
+            outline: none;
+        }
+        .bot-input:focus { border-color: #0ff; box-shadow: 0 0 8px rgba(0,255,255,0.2); }
+        .bot-input::placeholder { color: #555; }
+        .bot-save-btn {
+            padding: 8px 14px;
+            background: linear-gradient(135deg, #0088cc, #005580);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 0.85em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+        .bot-save-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(0,136,204,0.4); }
+        @media (max-width: 900px) {
+            .site-header { flex-direction: column; align-items: center; text-align: center; }
+            .header-clock { font-size: 1.3em; }
+            .bot-input { width: 140px; }
         }
         .grid {
             display: grid;
@@ -932,7 +1017,22 @@ String CameraWebServer::generateDashboardHTML() {
 </head>
 <body>
     <div class="container">
-        <h1>ESP32-CAM Dashboard</h1>
+        <div class="site-header">
+            <div class="header-title">&#128247; ESP32-CAM Dashboard</div>
+            <div class="header-clock" id="headerClock">00:00:00</div>
+            <div class="header-bot">
+                <div id="botLinkDisplay" style="display:none;align-items:center;gap:8px;">
+                    <a id="botLink" href="#" target="_blank" rel="noopener" class="bot-link">
+                        &#9992; Telegram Bot
+                    </a>
+                    <button onclick="editBotLink()" class="bot-edit-btn" title="Cambiar usuario">&#9998;</button>
+                </div>
+                <div id="botInputArea" style="display:flex;align-items:center;gap:8px;">
+                    <input type="text" id="botUsernameInput" class="bot-input" placeholder="@username_bot">
+                    <button onclick="saveBotLink()" class="bot-save-btn">Guardar</button>
+                </div>
+            </div>
+        </div>
 
         <div class="grid">
             <div class="card">
@@ -1653,6 +1753,50 @@ String CameraWebServer::generateDashboardHTML() {
             }
         }
         // ── Fin grabación ─────────────────────────────────────────────
+
+        // === Reloj en tiempo real ===
+        function updateClock() {
+            const now = new Date();
+            const h = String(now.getHours()).padStart(2, '0');
+            const m = String(now.getMinutes()).padStart(2, '0');
+            const s = String(now.getSeconds()).padStart(2, '0');
+            document.getElementById('headerClock').textContent = h + ':' + m + ':' + s;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // === Link al Bot de Telegram ===
+        function loadBotLink() {
+            const username = localStorage.getItem('tg_bot_username');
+            if (username) {
+                const link = document.getElementById('botLink');
+                link.href = 'https://t.me/' + username;
+                link.textContent = '\u2708 @' + username;
+                document.getElementById('botLinkDisplay').style.display = 'flex';
+                document.getElementById('botInputArea').style.display = 'none';
+            } else {
+                document.getElementById('botLinkDisplay').style.display = 'none';
+                document.getElementById('botInputArea').style.display = 'flex';
+            }
+        }
+        function saveBotLink() {
+            let username = document.getElementById('botUsernameInput').value.trim();
+            if (!username) return;
+            username = username.replace(/^@/, '');
+            localStorage.setItem('tg_bot_username', username);
+            loadBotLink();
+        }
+        function editBotLink() {
+            const username = localStorage.getItem('tg_bot_username') || '';
+            document.getElementById('botUsernameInput').value = username;
+            document.getElementById('botLinkDisplay').style.display = 'none';
+            document.getElementById('botInputArea').style.display = 'flex';
+            document.getElementById('botUsernameInput').focus();
+        }
+        document.getElementById('botUsernameInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') saveBotLink();
+        });
+        loadBotLink();
 
         // Cargar configuracion al inicio
         loadSettings();

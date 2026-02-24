@@ -9,7 +9,17 @@
 #define BYPASS_BUTTON_PIN 15     // Pin del botón (LOW = saltar configuración)
 #define CREDENTIAL_TIMEOUT 30000 // Timeout por credencial en ms (30 segundos)
 
-// Estructura para almacenar las credenciales
+// ============================================
+// SOPORTE MULTI-RED WiFi
+// ============================================
+#define MAX_WIFI_NETWORKS 5
+
+struct WiFiEntry {
+    String ssid;
+    String password;
+};
+
+// Estructura para almacenar las credenciales base
 struct Credentials {
     String wifiSSID;
     String wifiPassword;
@@ -27,7 +37,7 @@ public:
     // Solicitar credenciales (retorna true si se completó, false si usó guardadas)
     bool requestCredentials();
 
-    // Getters para las credenciales
+    // Getters base (delegan a la red activa)
     String getWifiSSID();
     String getWifiPassword();
     String getBotToken();
@@ -39,15 +49,34 @@ public:
     // Verificar si hay credenciales guardadas
     bool hasStoredCredentials();
 
+    // ── Multi-WiFi ────────────────────────────────────────────────
+    int       getNetworkCount();
+    int       getActiveNetworkIndex();
+    WiFiEntry getNetwork(int index);
+    bool      addNetwork(const String& ssid, const String& password);
+    bool      updateNetwork(int index, const String& ssid, const String& password);
+    bool      deleteNetwork(int index);
+    void      setActiveNetworkIndex(int index);
+
 private:
     Credentials credentials;
     bool credentialsLoaded;
+
+    // Almacenamiento multi-red
+    WiFiEntry wifiNetworks[MAX_WIFI_NETWORKS];
+    int wifiNetworkCount;
+    int activeNetworkIndex;
 
     // Cargar credenciales desde Preferences
     void loadCredentials();
 
     // Guardar credenciales en Preferences
     void saveCredentials();
+
+    // Multi-WiFi: carga, guarda y migración desde clave única legacy
+    void loadWiFiNetworks();
+    void saveWiFiNetworks();
+    void migrateFromSingleNetwork();
 
     // Solicitar un valor individual por serial con timeout
     // Retorna true si se ingresó un valor nuevo, false si se usó el guardado

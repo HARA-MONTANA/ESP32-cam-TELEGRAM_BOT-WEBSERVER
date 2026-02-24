@@ -37,6 +37,13 @@ private:
     void handleDownloadRecording();
     void handleDeleteRecording();
 
+    // Handlers de rutas - gestión WiFi
+    void handleGetWiFiNetworks();
+    void handleAddWiFiNetwork();
+    void handleUpdateWiFiNetwork();
+    void handleDeleteWiFiNetwork();
+    void handleGetWiFiStatus();
+
     void handleNotFound();
 
     // Generar HTML del dashboard

@@ -42,7 +42,8 @@ RecordingHandler::RecordingHandler()
       _startTime(0), _lastFrameTime(0), _frameCount(0),
       _riffSizeOffset(0), _aviFramesOffset(0),
       _strhFramesOffset(0), _moviListSizeOffset(0),
-      _totalBytes(0), _width(0), _height(0) {}
+      _totalBytes(0), _width(0), _height(0),
+      _frameIndex(nullptr), _maxFrames(0) {}
 
 // ---------- Helpers de escritura binaria ----------
 
@@ -165,6 +166,13 @@ bool RecordingHandler::writeAVIHeader(int width, int height, int fps) {
 bool RecordingHandler::writeFrame(const uint8_t* data, size_t len) {
     if (!_aviFile) return false;
 
+    // Guardar offset del frame en el índice (antes de escribir el chunk)
+    if (_frameIndex && _frameCount < _maxFrames) {
+        // dwOffset en idx1: posición del chunk '00dc' relativa al inicio de movi data (byte 224)
+        _frameIndex[_frameCount].offset = _totalBytes - 224;
+        _frameIndex[_frameCount].size   = (uint32_t)len;
+    }
+
     // Chunk '00dc': tag (4) + tamaño (4) + datos JPEG
     writeFCC(_aviFile, "00dc");
     write32LE(_aviFile, (uint32_t)len);
@@ -187,24 +195,39 @@ bool RecordingHandler::writeFrame(const uint8_t* data, size_t len) {
 bool RecordingHandler::finalizeAVI() {
     if (!_aviFile) return false;
 
-    uint32_t fileSize = _totalBytes;
+    // Tamaño del movi ANTES de añadir idx1 (para el campo LIST movi size)
+    uint32_t sizeBeforeIdx1 = _totalBytes;
 
-    // RIFF chunk size = fileSize - 8
-    seekAndWrite32LE(_riffSizeOffset, fileSize - 8);
+    // Escribir idx1 al final del archivo (fuera del LIST movi)
+    if (_frameIndex && _frameCount > 0) {
+        writeFCC(_aviFile, "idx1");
+        write32LE(_aviFile, (uint32_t)_frameCount * 16);  // 16 bytes por entrada
+        for (int i = 0; i < _frameCount; i++) {
+            writeFCC(_aviFile, "00dc");
+            write32LE(_aviFile, 0x00000010);              // AVIIF_KEYFRAME
+            write32LE(_aviFile, _frameIndex[i].offset);
+            write32LE(_aviFile, _frameIndex[i].size);
+        }
+    }
+    free(_frameIndex);
+    _frameIndex = nullptr;
 
-    // movi LIST size = 4('movi') + todos los frames = fileSize - 220
-    seekAndWrite32LE(_moviListSizeOffset, fileSize - 220);
+    uint32_t totalFileSize = _totalBytes;
 
-    // Total frames en avih
+    // RIFF chunk size = tamaño total - 8 (incluye idx1)
+    seekAndWrite32LE(_riffSizeOffset, totalFileSize - 8);
+
+    // movi LIST size: solo los frames, sin idx1 (totalBytes antes de idx1 - 220)
+    seekAndWrite32LE(_moviListSizeOffset, sizeBeforeIdx1 - 220);
+
+    // Total frames en avih y strh
     seekAndWrite32LE(_aviFramesOffset, (uint32_t)_frameCount);
-
-    // Total frames en strh
     seekAndWrite32LE(_strhFramesOffset, (uint32_t)_frameCount);
 
     _aviFile.flush();
     _aviFile.close();
 
-    Serial.printf("[REC] Finalizado: %d frames, %u bytes\n", _frameCount, fileSize);
+    Serial.printf("[REC] Finalizado: %d frames, %u bytes\n", _frameCount, totalFileSize);
     return true;
 }
 
@@ -262,6 +285,17 @@ bool RecordingHandler::startRecording(int fps) {
     _frameCount      = 0;
     _totalBytes      = 0;
 
+    // Alocar índice de frames en PSRAM (para idx1 al finalizar)
+    _maxFrames = MAX_RECORDING_SECONDS * _fps + 10;
+    _frameIndex = (FrameEntry*)heap_caps_malloc(_maxFrames * sizeof(FrameEntry),
+                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!_frameIndex) {
+        _frameIndex = (FrameEntry*)malloc(_maxFrames * sizeof(FrameEntry));
+    }
+    if (!_frameIndex) {
+        Serial.println("[REC] Sin memoria para idx1, grabacion sin indice de frames");
+    }
+
     // Escribir cabecera AVI
     if (!writeAVIHeader(_width, _height, _fps)) {
         _aviFile.close();
@@ -292,11 +326,13 @@ bool RecordingHandler::stopRecording() {
     _isRecording = false;
 
     if (_frameCount > 0) {
-        finalizeAVI();
+        finalizeAVI();  // finalizeAVI libera _frameIndex internamente
         Serial.printf("[REC] Guardada: %s (%d frames)\n",
                       _currentFilename.c_str(), _frameCount);
     } else {
         // Sin frames: eliminar archivo vacío
+        free(_frameIndex);
+        _frameIndex = nullptr;
         _aviFile.close();
         SD_MMC.remove(_currentFilename);
         _currentFilename = "";
@@ -418,4 +454,113 @@ bool RecordingHandler::deleteRecording(String filename) {
     if (filename.indexOf("..") >= 0) return false;
     String path = "/" + String(RECORDINGS_FOLDER) + "/" + filename;
     return SD_MMC.remove(path);
+}
+
+// ---------- Reparación de archivos sin finalizar ----------
+
+bool RecordingHandler::tryRepairAVI(const String& path) {
+    // Abrir en modo lectura/escritura sin truncar
+    File f = SD_MMC.open(path.c_str(), "r+");
+    if (!f) return false;
+
+    size_t fileSize = f.size();
+    if (fileSize < 224) {
+        f.close();
+        SD_MMC.remove(path.c_str());
+        Serial.printf("[REC] Archivo demasiado pequeño eliminado: %s\n", path.c_str());
+        return false;
+    }
+
+    // Leer dwTotalFrames en offset 48; si != 0 ya está finalizado
+    uint8_t buf[4];
+    f.seek(48);
+    f.read(buf, 4);
+    uint32_t totalFrames = (uint32_t)buf[0] | ((uint32_t)buf[1] << 8)
+                         | ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
+    if (totalFrames != 0) {
+        f.close();
+        return false;  // ya finalizado correctamente
+    }
+
+    // Contar frames desde offset 224 escaneando chunks '00dc'
+    uint32_t pos = 224;
+    int frameCount = 0;
+    uint8_t tag[4];
+    while (pos + 8 <= (uint32_t)fileSize) {
+        f.seek(pos);
+        if (f.read(tag, 4) != 4) break;
+        if (tag[0] != '0' || tag[1] != '0' || tag[2] != 'd' || tag[3] != 'c') break;
+
+        if (f.read(buf, 4) != 4) break;
+        uint32_t chunkSize = (uint32_t)buf[0] | ((uint32_t)buf[1] << 8)
+                           | ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
+
+        if (pos + 8 + chunkSize > (uint32_t)fileSize) break;  // chunk truncado
+        frameCount++;
+        pos += 8 + chunkSize;
+        if (chunkSize % 2) pos++;  // padding AVI
+    }
+
+    if (frameCount == 0) {
+        f.close();
+        SD_MMC.remove(path.c_str());
+        Serial.printf("[REC] AVI sin frames eliminado: %s\n", path.c_str());
+        return false;
+    }
+
+    // Reparar: actualizar RIFF size (offset 4)
+    uint32_t v = (uint32_t)fileSize - 8;
+    buf[0] = v; buf[1] = v >> 8; buf[2] = v >> 16; buf[3] = v >> 24;
+    f.seek(4);
+    f.write(buf, 4);
+
+    // movi LIST size (offset 216): desde 'movi' FCC hasta fin de datos = fileSize - 220
+    v = (uint32_t)fileSize - 220;
+    buf[0] = v; buf[1] = v >> 8; buf[2] = v >> 16; buf[3] = v >> 24;
+    f.seek(216);
+    f.write(buf, 4);
+
+    // dwTotalFrames en avih (offset 48)
+    v = (uint32_t)frameCount;
+    buf[0] = v; buf[1] = v >> 8; buf[2] = v >> 16; buf[3] = v >> 24;
+    f.seek(48);
+    f.write(buf, 4);
+
+    // dwLength en strh (offset 140)
+    f.seek(140);
+    f.write(buf, 4);
+
+    f.flush();
+    f.close();
+    Serial.printf("[REC] AVI reparado: %s (%d frames)\n", path.c_str(), frameCount);
+    return true;
+}
+
+void RecordingHandler::repairRecordings() {
+    if (!sdCard.isInitialized()) return;
+
+    String folder = "/" + String(RECORDINGS_FOLDER);
+    File dir = SD_MMC.open(folder);
+    if (!dir || !dir.isDirectory()) return;
+
+    // Recopilar rutas primero para no interferir con el iterador del directorio
+    String paths[50];
+    int count = 0;
+    File file = dir.openNextFile();
+    while (file && count < 50) {
+        if (!file.isDirectory()) {
+            String name = String(file.name());
+            // file.name() puede devolver ruta completa o solo nombre según versión de SDK
+            String path = name.startsWith("/") ? name : (folder + "/" + name);
+            if (path.endsWith(".avi") || path.endsWith(".AVI")) {
+                paths[count++] = path;
+            }
+        }
+        file = dir.openNextFile();
+    }
+    dir.close();
+
+    for (int i = 0; i < count; i++) {
+        tryRepairAVI(paths[i]);
+    }
 }

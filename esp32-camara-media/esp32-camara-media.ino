@@ -93,7 +93,10 @@ void setup() {
     if (!sdCard.init()) {
         Serial.println("ADVERTENCIA: SD no disponible, continuando sin almacenamiento local");
     } else {
-        Serial.println("SD Card OK\n");
+        Serial.println("SD Card OK");
+        // Reparar AVIs que quedaron sin finalizar por reinicios inesperados
+        recordingHandler.repairRecordings();
+        Serial.println();
     }
 
     // Conectar WiFi

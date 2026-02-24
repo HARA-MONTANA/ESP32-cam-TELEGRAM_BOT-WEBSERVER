@@ -37,6 +37,9 @@ public:
     String listRecordingsJSON();
     bool deleteRecording(String filename);
 
+    // Reparar archivos AVI que quedaron sin finalizar (llamar en setup tras SD init)
+    void repairRecordings();
+
 private:
     bool _isRecording;
     int _fps;
@@ -57,10 +60,19 @@ private:
     int _width;
     int _height;
 
+    // Índice de frames para el chunk idx1 (seeking en reproductores)
+    struct FrameEntry {
+        uint32_t offset;  // offset del chunk desde inicio de movi data (byte 224)
+        uint32_t size;    // tamaño del dato JPEG (sin cabecera '00dc')
+    };
+    FrameEntry* _frameIndex;
+    int _maxFrames;
+
     // Escritura AVI
     bool writeAVIHeader(int width, int height, int fps);
     bool writeFrame(const uint8_t* data, size_t len);
     bool finalizeAVI();
+    bool tryRepairAVI(const String& path);
 
     // Helpers de escritura binaria
     void write32LE(File& f, uint32_t v);

@@ -1,5 +1,6 @@
 #include "sleep_manager.h"
 #include "telegram_bot.h"
+#include "recording_handler.h"
 #include "config.h"
 #include <WiFi.h>
 #include <Preferences.h>
@@ -53,6 +54,7 @@ bool SleepManager::isSleeping() const {
 void SleepManager::checkAutoSleep() {
     if (sleeping) return;
     if (inactivityTimeout == 0) return;  // auto-sleep desactivado
+    if (recordingHandler.isRecording()) return;  // no dormir durante grabacion
     if (millis() - lastActivityTime >= inactivityTimeout) {
         Serial.printf("[Sleep] Inactividad de %lu min → entrando en modo sleep.\n",
                       inactivityTimeout / 60000UL);

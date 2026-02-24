@@ -409,10 +409,11 @@ void CameraWebServer::handleDownloadRecording() {
     server.send(200, "video/x-msvideo", "");
 
     WiFiClient client = server.client();
-    uint8_t buf[1024];
+    static uint8_t buf[4096];  // buffer estático: no consume stack, 4x más rápido
     while (f.available() && client.connected()) {
         int len = f.read(buf, sizeof(buf));
         if (len > 0) client.write(buf, len);
+        yield();  // alimentar watchdog en archivos grandes
     }
     f.close();
 }

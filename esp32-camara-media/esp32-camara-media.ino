@@ -78,6 +78,10 @@ void setup() {
         ESP.restart();
     }
 
+    // No-op: el botón está en GPIO13, que no interfiere con SD_MMC en modo
+    // 1-bit. INPUT_PULLUP puede permanecer activo sin causar parpadeo.
+    credentialsManager.releaseBypassPin();
+
     // Inicializar camara
     Serial.println("[1/5] Inicializando camara...");
     if (!camera.init()) {

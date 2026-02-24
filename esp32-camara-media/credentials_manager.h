@@ -6,7 +6,8 @@
 // ============================================
 // CONFIGURACIÓN DEL BOTÓN DE BYPASS
 // ============================================
-#define BYPASS_BUTTON_PIN 15     // Pin del botón (LOW = saltar configuración)
+#define BYPASS_BUTTON_PIN 13     // Pin del botón (LOW = saltar configuración)
+                                 // GPIO13: libre en modo SD_MMC 1-bit, seguro para boot
 #define CREDENTIAL_TIMEOUT 30000 // Timeout por credencial en ms (30 segundos)
 
 // ============================================
@@ -43,8 +44,13 @@ public:
     String getBotToken();
     long getGmtOffsetSec();
 
-    // Verificar si el botón de bypass está presionado
+    // Verificar si el botón de bypass está presionado (con debounce)
     bool isBypassButtonPressed();
+
+    // No-op: GPIO13 no forma parte del bus SD_MMC en modo 1-bit, por lo que
+    // INPUT_PULLUP puede permanecer activo sin causar parpadeo. Se conserva
+    // por compatibilidad de interfaz.
+    void releaseBypassPin();
 
     // Verificar si hay credenciales guardadas
     bool hasStoredCredentials();
@@ -85,7 +91,7 @@ private:
     // Solicitar timezone con validación
     bool requestTimezone(long& offset, long savedOffset, bool* buttonPressed = nullptr);
 
-    // Leer línea del serial con timeout (buttonPressed se pone a true si se presiona GPIO15)
+    // Leer línea del serial con timeout (buttonPressed se pone a true si se presiona GPIO13)
     String readSerialLineWithTimeout(unsigned long timeout, bool* buttonPressed = nullptr);
 };
 

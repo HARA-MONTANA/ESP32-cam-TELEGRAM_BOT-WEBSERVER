@@ -49,6 +49,7 @@ public:
     void setSleepPollInterval(unsigned long intervalMs);
     unsigned long getSleepPollInterval() const;
     void saveSleepPollInterval();
+    void loadSleepPollInterval();
 
     // Informacion de estado
     String getStatus() const;

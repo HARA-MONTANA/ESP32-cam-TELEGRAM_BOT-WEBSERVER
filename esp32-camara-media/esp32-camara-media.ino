@@ -78,8 +78,8 @@ void setup() {
         ESP.restart();
     }
 
-    // Liberar GPIO15 (SD_MMC CMD): evita que el LED del botón parpadee
-    // con cada acceso a la SD card durante la operación normal.
+    // No-op: el botón está en GPIO13, que no interfiere con SD_MMC en modo
+    // 1-bit. INPUT_PULLUP puede permanecer activo sin causar parpadeo.
     credentialsManager.releaseBypassPin();
 
     // Inicializar camara

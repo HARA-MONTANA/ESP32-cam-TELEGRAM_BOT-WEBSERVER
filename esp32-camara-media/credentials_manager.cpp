@@ -33,12 +33,11 @@ bool CredentialsManager::isBypassButtonPressed() {
 }
 
 void CredentialsManager::releaseBypassPin() {
-    // GPIO15 es SD_MMC CMD en el ESP32-CAM AI-Thinker.
-    // Con INPUT_PULLUP el pull-up interno (~45 kΩ) enciende tenuemente el LED
-    // y cada transacción SD lo apaga → parpadeo.
-    // Cambiar a INPUT (sin pull-up) deja la línea libre al driver SD_MMC
-    // y elimina la corriente continua que causaba el parpadeo visible.
-    pinMode(BYPASS_BUTTON_PIN, INPUT);
+    // GPIO13 no forma parte del bus SD_MMC en modo 1-bit, por lo que el
+    // INPUT_PULLUP puede permanecer activo durante toda la vida del sistema
+    // sin causar parpadeo ni interferencia con la SD card.
+    // Esta función se conserva por compatibilidad de interfaz; no hay nada
+    // que liberar.
 }
 
 bool CredentialsManager::hasStoredCredentials() {
@@ -356,7 +355,7 @@ bool CredentialsManager::requestCredentials() {
 
     // Verificar si el botón de bypass está presionado al inicio
     if (isBypassButtonPressed() && hasStoredCredentials()) {
-        Serial.println("\nBoton de bypass detectado (PIN 15 = LOW)");
+        Serial.println("\nBoton de bypass detectado (GPIO13 = LOW)");
         Serial.println("Usando credenciales guardadas...");
         Serial.printf("  WiFi SSID: %s\n", credentials.wifiSSID.c_str());
         Serial.printf("  Bot Token: %s...%s\n",
@@ -375,7 +374,7 @@ bool CredentialsManager::requestCredentials() {
     Serial.println("\nIngrese las credenciales por serial.");
     Serial.println("- Con valor guardado: timeout de " + String(CREDENTIAL_TIMEOUT / 1000) + "s, ENTER o timeout usa el guardado");
     Serial.println("- Sin valor guardado: espera hasta que ingrese un valor");
-    Serial.println("- Presione el BOTON (GPIO15) para saltar y usar guardadas");
+    Serial.println("- Presione el BOTON (GPIO13) para saltar y usar guardadas");
     Serial.println("----------------------------------------");
 
     bool anyChanged = false;

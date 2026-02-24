@@ -6,7 +6,7 @@
 // ============================================
 // Las credenciales se gestionan dinámicamente por credentials_manager
 // - Se solicitan por serial al iniciar
-// - Se pueden saltar presionando el botón en PIN 15 (LOW)
+// - Se pueden saltar presionando el botón en GPIO13 (LOW)
 // - Cada campo tiene timeout de 30 segundos
 // - Presionar ENTER usa el último valor guardado
 //

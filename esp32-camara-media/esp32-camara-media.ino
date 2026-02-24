@@ -78,6 +78,10 @@ void setup() {
         ESP.restart();
     }
 
+    // Liberar GPIO15 (SD_MMC CMD): evita que el LED del botón parpadee
+    // con cada acceso a la SD card durante la operación normal.
+    credentialsManager.releaseBypassPin();
+
     // Inicializar camara
     Serial.println("[1/5] Inicializando camara...");
     if (!camera.init()) {

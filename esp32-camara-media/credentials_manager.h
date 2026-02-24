@@ -43,8 +43,14 @@ public:
     String getBotToken();
     long getGmtOffsetSec();
 
-    // Verificar si el botón de bypass está presionado
+    // Verificar si el botón de bypass está presionado (con debounce)
     bool isBypassButtonPressed();
+
+    // Liberar GPIO15 tras el arranque para evitar parpadeo por actividad SD_MMC.
+    // GPIO15 es la línea CMD de SD_MMC en el ESP32-CAM AI-Thinker; mantener
+    // INPUT_PULLUP activo hace que el LED conectado al botón parpadee con cada
+    // transacción de la SD card. Llamar una vez terminado requestCredentials().
+    void releaseBypassPin();
 
     // Verificar si hay credenciales guardadas
     bool hasStoredCredentials();

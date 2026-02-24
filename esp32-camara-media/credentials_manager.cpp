@@ -23,8 +23,22 @@ void CredentialsManager::init() {
 }
 
 bool CredentialsManager::isBypassButtonPressed() {
-    // El botón está presionado cuando el pin está en LOW
-    return digitalRead(BYPASS_BUTTON_PIN) == LOW;
+    // Debounce: confirmar 3 lecturas consecutivas en LOW (separadas 20 ms).
+    // Evita falsos disparos por transitorios de la línea SD_MMC CMD durante el arranque.
+    for (int i = 0; i < 3; i++) {
+        if (digitalRead(BYPASS_BUTTON_PIN) != LOW) return false;
+        if (i < 2) delay(20);
+    }
+    return true;
+}
+
+void CredentialsManager::releaseBypassPin() {
+    // GPIO15 es SD_MMC CMD en el ESP32-CAM AI-Thinker.
+    // Con INPUT_PULLUP el pull-up interno (~45 kΩ) enciende tenuemente el LED
+    // y cada transacción SD lo apaga → parpadeo.
+    // Cambiar a INPUT (sin pull-up) deja la línea libre al driver SD_MMC
+    // y elimina la corriente continua que causaba el parpadeo visible.
+    pinMode(BYPASS_BUTTON_PIN, INPUT);
 }
 
 bool CredentialsManager::hasStoredCredentials() {

@@ -12,6 +12,8 @@ Servidor multimedia para ESP32-CAM con dashboard web, streaming de video en vivo
 - **Configuracion por Serial** - Las credenciales (WiFi, token de Telegram, timezone) se configuran por puerto serial y se guardan en memoria NVS
 - **Control de camara** - Brillo, contraste, saturacion, efectos, balance de blancos, exposicion, ganancia, calidad JPEG, resolucion y flash LED
 - **Multi-usuario** - Soporte para hasta 10 usuarios autorizados en Telegram con roles (admin + usuarios)
+- **Multi-red WiFi** - Guarda hasta 5 redes WiFi y cambia automaticamente si pierde conexion
+- **Modo ahorro de energia** - Reduce consumo ~40-50% en reposo activando WiFi modem sleep y reduciendo polling de Telegram
 
 ## Hardware requerido
 
@@ -71,11 +73,21 @@ Al encender por primera vez, el sistema solicita credenciales por puerto serial 
 
 Las credenciales se guardan en memoria NVS y se reutilizan en reinicios posteriores. Para saltar la configuracion y usar las credenciales guardadas:
 - Presiona **ENTER** en cada campo (usa el valor guardado)
-- Conecta **GPIO15 a GND** al encender (bypass completo)
+- Conecta **GPIO13 a GND** al encender (bypass completo)
+
+### Multi-red WiFi
+
+El sistema soporta hasta **5 redes WiFi guardadas**. Si pierde conexion a la red activa, prueba automaticamente las demas en orden. Puedes agregar redes adicionales durante la configuracion serial.
 
 ## Comandos de Telegram
 
 El primer usuario que escriba al bot se convierte automaticamente en **administrador**.
+
+### General
+| Comando | Descripcion |
+|---------|-------------|
+| `/start` | Bienvenida e instrucciones |
+| `/ayuda` | Ver todos los comandos disponibles |
 
 ### Fotos
 | Comando | Descripcion |
@@ -101,6 +113,14 @@ El primer usuario que escriba al bot se convierte automaticamente en **administr
 | `/config` | Ver configuracion actual |
 | `/hora HH:MM` | Cambiar hora de la foto diaria |
 
+### Ahorro de energia
+| Comando | Descripcion |
+|---------|-------------|
+| `/dormir` | Activar modo sleep manualmente |
+| `/despertar` | Salir del modo sleep |
+| `/sleepconfig` | Ver configuracion de sleep |
+| `/sleepconfig N` | Cambiar timeout de inactividad (minutos, 0 = desactivado) |
+
 ### Usuarios (solo admin)
 | Comando | Descripcion |
 |---------|-------------|
@@ -108,6 +128,7 @@ El primer usuario que escriba al bot se convierte automaticamente en **administr
 | `/myid` | Ver tu ID de Telegram |
 | `/add ID` | Agregar usuario autorizado |
 | `/remove ID` | Eliminar usuario |
+| `/admin ID` | Dar permisos de admin a un usuario |
 
 ### Sistema
 | Comando | Descripcion |
@@ -151,7 +172,7 @@ esp32-camara-media/
 ├── esp32-camara-media.ino   # Sketch principal (setup/loop)
 ├── config.h                 # Pines, constantes y configuracion
 ├── credentials_manager.h    # Gestion de credenciales (header)
-├── credentials_manager.cpp  # Gestion de credenciales (NVS + serial)
+├── credentials_manager.cpp  # Gestion de credenciales (NVS + serial + multi-WiFi)
 ├── camera_handler.h         # Control de camara (header)
 ├── camera_handler.cpp       # Inicializacion OV2640, captura, ajustes
 ├── web_server.h             # Servidor web (header)
@@ -159,7 +180,9 @@ esp32-camara-media/
 ├── telegram_bot.h           # Bot de Telegram (header)
 ├── telegram_bot.cpp         # Comandos, foto diaria, multi-usuario
 ├── sd_handler.h             # Manejo de SD (header)
-└── sd_handler.cpp           # Lectura/escritura SD, organizacion por fecha
+├── sd_handler.cpp           # Lectura/escritura SD, organizacion por fecha
+├── sleep_manager.h          # Modo ahorro de energia (header)
+└── sleep_manager.cpp        # WiFi modem sleep, polling adaptativo
 ```
 
 ## Esquema de conexion
@@ -170,7 +193,7 @@ ESP32-CAM AI-Thinker
 │  OV2640 Camera   │
 │                  │
 │  GPIO 4  → Flash LED
-│  GPIO 15 → Boton bypass (opcional, conectar a GND)
+│  GPIO 13 → Boton bypass (opcional, conectar a GND)
 │                  │
 │  SD Card Slot    │ (modo 1-bit para liberar GPIO4)
 │                  │
@@ -184,7 +207,8 @@ ESP32-CAM AI-Thinker
 ## Notas
 
 - La tarjeta SD es **opcional**. Sin ella, el sistema funciona normalmente pero no guarda fotos localmente.
-- Las fotos se organizan en carpetas: `/fotos_diarias` (foto automatica), `/fotos_telegram` (capturadas por Telegram) y `/fotos_web` (capturadas desde el dashboard web). El formato de nombre es `YYYY-MM-DD_HH-MM.jpg`.
+- Las fotos se organizan en carpetas: `/fotos_diarias` (foto automatica), `/fotos_telegram` (capturadas por Telegram) y `/fotos_web` (capturadas desde el dashboard web). El formato de nombre es `YYYY-MM-DD_HH-MM-SS.jpg`.
 - El flash LED (GPIO4) se comparte con la SD en modo 4-bit. Se usa modo **1-bit** para evitar conflictos.
-- El sistema se reconecta automaticamente a WiFi si pierde conexion.
+- El sistema se reconecta automaticamente a WiFi si pierde conexion, probando todas las redes guardadas en orden circular con backoff exponencial.
 - La hora se sincroniza por NTP cada hora.
+- El **modo sleep** activa WiFi modem sleep tras N minutos de inactividad (por defecto 10 min). El web server sigue activo; cualquier conexion web o mensaje de Telegram despierta el sistema automaticamente.

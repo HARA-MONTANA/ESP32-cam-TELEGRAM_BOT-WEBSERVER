@@ -29,14 +29,6 @@ private:
     void handleViewPhoto();
     void handleDeletePhoto();
 
-    // Handlers de rutas - grabaciones de video
-    void handleStartRecording();
-    void handleStopRecording();
-    void handleRecordingStatus();
-    void handleListRecordings();
-    void handleDownloadRecording();
-    void handleDeleteRecording();
-
     // Handlers de rutas - gestión WiFi
     void handleGetWiFiNetworks();
     void handleAddWiFiNetwork();

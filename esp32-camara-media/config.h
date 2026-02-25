@@ -84,11 +84,4 @@
 // GMT_OFFSET_SEC ahora se gestiona dinámicamente por credentials_manager
 #define DAYLIGHT_OFFSET_SEC 0
 
-// ============================================
-// CONFIGURACIÓN DE GRABACIÓN DE VIDEO
-// ============================================
-#define RECORDINGS_FOLDER "grabaciones"         // Carpeta para guardar videos AVI
-#define MAX_RECORDING_SECONDS 300               // Duración máxima: 5 minutos
-#define MIN_FREE_SD_MB_FOR_RECORDING 50         // Detener grabación si menos de 50MB libres
-
 #endif // CONFIG_H

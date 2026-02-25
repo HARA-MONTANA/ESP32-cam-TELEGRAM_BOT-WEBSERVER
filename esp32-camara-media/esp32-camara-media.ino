@@ -30,7 +30,6 @@
 #include "telegram_bot.h"
 #include "sd_handler.h"
 #include "sleep_manager.h"
-#include "recording_handler.h"
 
 // Variables para control de tiempo
 unsigned long lastNTPSync = 0;
@@ -98,8 +97,6 @@ void setup() {
         Serial.println("ADVERTENCIA: SD no disponible, continuando sin almacenamiento local");
     } else {
         Serial.println("SD Card OK");
-        // Reparar AVIs que quedaron sin finalizar por reinicios inesperados
-        recordingHandler.repairRecordings();
         Serial.println();
     }
 
@@ -141,9 +138,6 @@ void loop() {
 
     // Verificar auto-sleep por inactividad
     sleepManager.checkAutoSleep();
-
-    // Capturar frames de grabacion si hay una grabacion activa
-    recordingHandler.update();
 
     // Manejar servidor web (siempre activo; las conexiones despiertan el sistema)
     webServer.handleClient();

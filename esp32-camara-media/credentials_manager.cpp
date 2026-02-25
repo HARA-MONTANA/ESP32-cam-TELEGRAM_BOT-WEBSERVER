@@ -33,11 +33,11 @@ bool CredentialsManager::isBypassButtonPressed() {
 }
 
 void CredentialsManager::releaseBypassPin() {
-    // GPIO13 no forma parte del bus SD_MMC en modo 1-bit, por lo que el
-    // INPUT_PULLUP puede permanecer activo durante toda la vida del sistema
-    // sin causar parpadeo ni interferencia con la SD card.
-    // Esta función se conserva por compatibilidad de interfaz; no hay nada
-    // que liberar.
+    // Una vez que las credenciales están cargadas, el botón ya no es necesario.
+    // Configurar el pin como OUTPUT LOW para apagar cualquier LED que esté
+    // conectado entre GPIO13 y GND (el INPUT_PULLUP previo lo mantendría HIGH).
+    pinMode(BYPASS_BUTTON_PIN, OUTPUT);
+    digitalWrite(BYPASS_BUTTON_PIN, LOW);
 }
 
 bool CredentialsManager::hasStoredCredentials() {

@@ -47,9 +47,8 @@ public:
     // Verificar si el botón de bypass está presionado (con debounce)
     bool isBypassButtonPressed();
 
-    // No-op: GPIO13 no forma parte del bus SD_MMC en modo 1-bit, por lo que
-    // INPUT_PULLUP puede permanecer activo sin causar parpadeo. Se conserva
-    // por compatibilidad de interfaz.
+    // Libera el pin del botón tras cargar las credenciales: lo pone en OUTPUT LOW
+    // para apagar cualquier LED conectado entre ese GPIO y GND.
     void releaseBypassPin();
 
     // Verificar si hay credenciales guardadas

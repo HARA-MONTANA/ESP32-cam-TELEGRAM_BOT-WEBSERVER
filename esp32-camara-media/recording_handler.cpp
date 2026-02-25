@@ -95,7 +95,7 @@ bool RecordingHandler::writeAVIHeader(int width, int height, int fps) {
     write32LE(_aviFile, usPerFrame);      // dwMicroSecPerFrame   offset 32
     write32LE(_aviFile, maxBytesPerSec);  // dwMaxBytesPerSec     offset 36
     write32LE(_aviFile, 0);               // dwPaddingGranularity offset 40
-    write32LE(_aviFile, 0);               // dwFlags              offset 44
+    write32LE(_aviFile, 0x10);            // dwFlags: AVIF_HASINDEX offset 44
     _aviFramesOffset = _totalBytes;       //                      offset 48
     write32LE(_aviFile, 0);               // dwTotalFrames (placeholder)
     write32LE(_aviFile, 0);               // dwInitialFrames      offset 52
@@ -214,18 +214,41 @@ bool RecordingHandler::finalizeAVI() {
 
     uint32_t totalFileSize = _totalBytes;
 
-    // RIFF chunk size = tamaño total - 8 (incluye idx1)
-    seekAndWrite32LE(_riffSizeOffset, totalFileSize - 8);
-
-    // movi LIST size: solo los frames, sin idx1 (totalBytes antes de idx1 - 220)
-    seekAndWrite32LE(_moviListSizeOffset, sizeBeforeIdx1 - 220);
-
-    // Total frames en avih y strh
-    seekAndWrite32LE(_aviFramesOffset, (uint32_t)_frameCount);
-    seekAndWrite32LE(_strhFramesOffset, (uint32_t)_frameCount);
-
+    // Confirmar todos los datos al SD antes de actualizar la cabecera.
+    // En algunas versiones del SDK de ESP32, el modo FILE_WRITE no garantiza
+    // que los seeks hacia atrás funcionen correctamente sobre el buffer de escritura.
+    // La solución robusta es cerrar el archivo aquí y reabrirlo en modo "r+"
+    // (lectura/escritura sin truncar), que sí soporta seek+write confiable,
+    // igual que hace tryRepairAVI().
     _aviFile.flush();
     _aviFile.close();
+
+    File f = SD_MMC.open(_currentFilename, "r+");
+    if (!f) {
+        Serial.println("[REC] Error al reabrir AVI para actualizar cabecera");
+        return false;
+    }
+
+    // Actualizar los cuatro campos placeholder escritos con valor 0 al inicio
+    auto seekWrite32 = [&](uint32_t offset, uint32_t value) {
+        uint8_t buf[4] = { (uint8_t)value, (uint8_t)(value >> 8),
+                           (uint8_t)(value >> 16), (uint8_t)(value >> 24) };
+        f.seek(offset);
+        f.write(buf, 4);
+    };
+
+    // RIFF chunk size = tamaño total - 8 (incluye idx1)
+    seekWrite32(_riffSizeOffset, totalFileSize - 8);
+
+    // movi LIST size: solo los frames, sin idx1 (totalBytes antes de idx1 - 220)
+    seekWrite32(_moviListSizeOffset, sizeBeforeIdx1 - 220);
+
+    // Total frames en avih y strh
+    seekWrite32(_aviFramesOffset, (uint32_t)_frameCount);
+    seekWrite32(_strhFramesOffset, (uint32_t)_frameCount);
+
+    f.flush();
+    f.close();
 
     Serial.printf("[REC] Finalizado: %d frames, %u bytes\n", _frameCount, totalFileSize);
     return true;

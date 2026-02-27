@@ -1,13 +1,15 @@
-# ESP32-CAM Media Server con Bot de Telegram
+# ESP32-CAM Media Server con Bot de Telegram y Bot de Discord
 
-Servidor multimedia para ESP32-CAM con dashboard web, streaming de video en vivo, bot de Telegram para control remoto y almacenamiento en tarjeta SD.
+Servidor multimedia para ESP32-CAM con dashboard web, streaming de video en vivo, bot de Telegram, bot de Discord y almacenamiento en tarjeta SD.
 
 ## Funcionalidades
 
 - **Dashboard Web** - Interfaz visual con tema cyberpunk neon para controlar la camara desde el navegador
 - **Streaming MJPEG** - Video en vivo accesible desde cualquier navegador en la red local
 - **Bot de Telegram** - Control remoto completo: captura de fotos, configuracion, gestion de usuarios
-- **Foto del dia** - Captura automatica programable con almacenamiento en SD y envio por Telegram
+- **Bot de Discord** - Control remoto desde Discord: fotos, fotos con flash, foto diaria, grabacion de video y estado del sistema
+- **Grabacion de video** - El bot de Discord puede grabar clips MP4 directamente desde el stream MJPEG (hasta 30 segundos)
+- **Foto del dia** - Captura automatica programable con almacenamiento en SD y envio por Telegram o Discord
 - **Tarjeta SD** - Almacenamiento local de fotos con organizacion por fecha
 - **Configuracion por Serial** - Las credenciales (WiFi, token de Telegram, timezone) se configuran por puerto serial y se guardan en memoria NVS
 - **Control de camara** - Brillo, contraste, saturacion, efectos, balance de blancos, exposicion, ganancia, calidad JPEG, resolucion y flash LED
@@ -138,6 +140,151 @@ El primer usuario que escriba al bot se convierte automaticamente en **administr
 | `/ip` | Ver direccion IP |
 | `/reiniciar` | Reiniciar el ESP32-CAM |
 
+## Bot de Discord
+
+El bot de Discord es un programa Python independiente que corre en tu PC o servidor y se comunica con la ESP32-CAM a traves de la red local.
+
+### Comandos disponibles
+
+Los comandos funcionan tanto como **slash commands** (`/foto`) como con el **prefix de texto** (`w!foto`):
+
+| Comando | Descripcion |
+|---------|-------------|
+| `/foto` | Captura una imagen en vivo y la envia al canal |
+| `/foto_flash` | Captura una imagen con el flash LED (GPIO4) encendido |
+| `/fotodiaria` | Envia la foto automatica del dia (la busca en la SD; si no hay, captura en vivo) |
+| `/video [segundos]` | Graba un clip MP4 del stream MJPEG y lo envia (1–30 segundos, default 10) |
+| `/estado` | Muestra RAM libre, PSRAM, senal WiFi, red, uptime e IP de la camara |
+| `/help` | Muestra la lista de todos los comandos |
+
+### Requisitos previos
+
+- Python 3.10 o superior
+- La ESP32-CAM encendida y conectada a la misma red WiFi que el PC
+- FFmpeg **no** es necesario; la grabacion de video usa OpenCV directamente
+
+### Configuracion paso a paso
+
+#### 1. Crear el bot en Discord Developer Portal
+
+1. Ve a [https://discord.com/developers/applications](https://discord.com/developers/applications) e inicia sesion.
+2. Haz clic en **New Application**, dale un nombre (ej. `ESP32-CAM`) y confirma.
+3. En el panel izquierdo ve a **Bot** y haz clic en **Add Bot** → **Yes, do it!**.
+4. En la seccion **Token**, haz clic en **Reset Token** y copia el token generado.
+   > Guarda este token en un lugar seguro; no lo compartas ni lo subas a Git.
+5. Desplaza hacia abajo hasta **Privileged Gateway Intents** y activa:
+   - **Message Content Intent**
+6. Guarda los cambios con **Save Changes**.
+
+#### 2. Invitar el bot a tu servidor
+
+1. En el panel izquierdo ve a **OAuth2 > URL Generator**.
+2. En **Scopes** marca: `bot` y `applications.commands`.
+3. En **Bot Permissions** marca: `Send Messages`, `Attach Files`, `Embed Links`, `Read Message History`.
+4. Copia la URL generada, pegala en el navegador e invita el bot a tu servidor.
+
+#### 3. Instalar dependencias Python
+
+```bash
+cd discord_bot
+pip install -r requirements.txt
+```
+
+Las dependencias son:
+
+| Paquete | Uso |
+|---------|-----|
+| `discord.py >= 2.3.2` | Libreria principal del bot (slash commands + texto) |
+| `requests >= 2.31.0` | Peticiones HTTP a la ESP32-CAM |
+| `python-dotenv >= 1.0.0` | Carga de variables desde el archivo `.env` |
+| `opencv-python >= 4.8.0` | Grabacion del stream MJPEG y escritura de MP4 |
+| `numpy >= 1.24.0` | Decodificacion de frames JPEG en memoria |
+
+#### 4. Configurar las credenciales
+
+Copia el archivo de ejemplo y editalo:
+
+```bash
+cp .env.example .env
+```
+
+Abre `.env` con cualquier editor de texto y completa los valores:
+
+```env
+# Token del bot (obtenido en el paso 1)
+DISCORD_TOKEN=TU_TOKEN_AQUI
+
+# IP local de la ESP32-CAM (consultala en el monitor serie o en tu router)
+ESP32_IP=192.168.1.100
+
+# Puerto del servidor web de la camara (por defecto 80)
+ESP32_PORT=80
+
+# Prefix para comandos de texto (los slash commands / siempre funcionan)
+COMMAND_PREFIX=w!
+```
+
+Alternativamente, puedes usar el **menu interactivo** para configurar sin editar el archivo:
+
+```bash
+python main.py
+# Selecciona la opcion 1 → Configurar credenciales
+```
+
+#### 5. Iniciar el bot
+
+**Con el menu interactivo (recomendado):**
+
+```bash
+python main.py
+# Selecciona la opcion 2 → Iniciar bot de Discord
+```
+
+**Directamente:**
+
+```bash
+python main.py
+```
+
+Cuando el bot arranque veras en la terminal:
+
+```
+HH:MM:SS [INFO] Bot conectado como ESP32-CAM#1234 (ID: xxxxxxxxxx)
+HH:MM:SS [INFO] ESP32-CAM → http://192.168.1.100:80
+HH:MM:SS [INFO] Sincronizados 6 comandos slash
+```
+
+Los slash commands pueden tardar hasta **1 hora** en aparecer globalmente en Discord tras la primera sincronizacion.
+
+#### 6. Grabar video sin iniciar el bot
+
+El menu tambien permite grabar clips directamente desde la terminal sin necesidad de Discord:
+
+```bash
+python main.py
+# Selecciona la opcion 3 → Grabar video desde el stream
+```
+
+Los videos se guardan en la carpeta `discord_bot/recordings/`.
+
+### Estructura del bot de Discord
+
+```
+discord_bot/
+├── main.py           # Menu interactivo (punto de entrada)
+├── bot.py            # Comandos de Discord (/foto, /video, /estado, etc.)
+├── recorder.py       # Grabacion de video desde el stream MJPEG (OpenCV)
+├── requirements.txt  # Dependencias Python
+└── .env.example      # Plantilla de configuracion (copia a .env)
+```
+
+### Notas del bot de Discord
+
+- El archivo `.env` **nunca debe subirse a Git** (ya esta en `.gitignore`).
+- El bot y la ESP32-CAM deben estar en la **misma red local** (WiFi). No funciona de forma remota a menos que uses un tunel como ngrok o expongas el puerto en el router.
+- El limite de archivos adjuntos en Discord sin Nitro Boost es **25 MB**. Si un video supera ese limite, el bot lo indica y sugiere reducir la duracion.
+- La senal WiFi se clasifica automaticamente: Excelente (> -60 dBm), Buena (> -70 dBm), Regular (> -80 dBm), Debil (<= -80 dBm).
+
 ## Dashboard Web
 
 Accede desde el navegador a `http://<IP-del-ESP32>/` para:
@@ -157,6 +304,7 @@ Accede desde el navegador a `http://<IP-del-ESP32>/` para:
 | `/stream` | GET | Streaming MJPEG |
 | `/capture` | GET | Capturar foto (JPEG) |
 | `/web-capture` | GET | Capturar y guardar en SD |
+| `/flash?state=on\|off` | GET | Activar/desactivar flash LED |
 | `/settings` | GET | Obtener configuracion de camara (JSON) |
 | `/settings` | POST | Actualizar configuracion de camara (JSON) |
 | `/status` | GET | Estado del sistema (JSON) |
@@ -168,21 +316,28 @@ Accede desde el navegador a `http://<IP-del-ESP32>/` para:
 ## Estructura del proyecto
 
 ```
-esp32-camara-media/
-├── esp32-camara-media.ino   # Sketch principal (setup/loop)
-├── config.h                 # Pines, constantes y configuracion
-├── credentials_manager.h    # Gestion de credenciales (header)
-├── credentials_manager.cpp  # Gestion de credenciales (NVS + serial + multi-WiFi)
-├── camera_handler.h         # Control de camara (header)
-├── camera_handler.cpp       # Inicializacion OV2640, captura, ajustes
-├── web_server.h             # Servidor web (header)
-├── web_server.cpp           # Dashboard, streaming, API REST
-├── telegram_bot.h           # Bot de Telegram (header)
-├── telegram_bot.cpp         # Comandos, foto diaria, multi-usuario
-├── sd_handler.h             # Manejo de SD (header)
-├── sd_handler.cpp           # Lectura/escritura SD, organizacion por fecha
-├── sleep_manager.h          # Modo ahorro de energia (header)
-└── sleep_manager.cpp        # WiFi modem sleep, polling adaptativo
+ESP32-cam-TELEGRAM_BOT-WEBSERVER/
+├── esp32-camara-media/
+│   ├── esp32-camara-media.ino   # Sketch principal (setup/loop)
+│   ├── config.h                 # Pines, constantes y configuracion
+│   ├── credentials_manager.h    # Gestion de credenciales (header)
+│   ├── credentials_manager.cpp  # Gestion de credenciales (NVS + serial + multi-WiFi)
+│   ├── camera_handler.h         # Control de camara (header)
+│   ├── camera_handler.cpp       # Inicializacion OV2640, captura, ajustes
+│   ├── web_server.h             # Servidor web (header)
+│   ├── web_server.cpp           # Dashboard, streaming, API REST
+│   ├── telegram_bot.h           # Bot de Telegram (header)
+│   ├── telegram_bot.cpp         # Comandos, foto diaria, multi-usuario
+│   ├── sd_handler.h             # Manejo de SD (header)
+│   ├── sd_handler.cpp           # Lectura/escritura SD, organizacion por fecha
+│   ├── sleep_manager.h          # Modo ahorro de energia (header)
+│   └── sleep_manager.cpp        # WiFi modem sleep, polling adaptativo
+└── discord_bot/
+    ├── main.py                  # Menu interactivo (punto de entrada)
+    ├── bot.py                   # Comandos de Discord
+    ├── recorder.py              # Grabacion de video MJPEG con OpenCV
+    ├── requirements.txt         # Dependencias Python
+    └── .env.example             # Plantilla de configuracion
 ```
 
 ## Esquema de conexion

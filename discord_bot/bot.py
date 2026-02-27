@@ -38,7 +38,7 @@ log = logging.getLogger("esp32-discord-bot")
 DISCORD_TOKEN: str = ""
 ESP32_IP: str = "192.168.1.100"
 ESP32_PORT: str = "80"
-COMMAND_PREFIX: str = "!"
+COMMAND_PREFIX: str = "w!"
 
 MAX_VIDEO_SECONDS: int = 30
 REQUEST_TIMEOUT: int = 10
@@ -55,7 +55,7 @@ def _load_config() -> None:
     DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
     ESP32_IP = os.getenv("ESP32_IP", "192.168.1.100")
     ESP32_PORT = os.getenv("ESP32_PORT", "80")
-    COMMAND_PREFIX = os.getenv("COMMAND_PREFIX", "!")
+    COMMAND_PREFIX = os.getenv("COMMAND_PREFIX", "w!")
 
 
 # ---------------------------------------------------------------------------

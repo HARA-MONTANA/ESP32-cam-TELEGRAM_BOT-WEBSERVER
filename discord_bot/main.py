@@ -34,7 +34,7 @@ def _load_env() -> dict[str, str]:
         "DISCORD_TOKEN": "",
         "ESP32_IP": "192.168.1.100",
         "ESP32_PORT": "80",
-        "COMMAND_PREFIX": "!",
+        "COMMAND_PREFIX": "w!",
     }
     if ENV_FILE.exists():
         saved = dotenv_values(str(ENV_FILE))
@@ -71,7 +71,7 @@ def _print_menu(cfg: dict[str, str]) -> None:
     token_label = "Configurado ✓" if token_ok else "NO configurado ✗"
     ip = cfg.get("ESP32_IP", "?")
     port = cfg.get("ESP32_PORT", "80")
-    prefix = cfg.get("COMMAND_PREFIX", "!")
+    prefix = cfg.get("COMMAND_PREFIX", "w!")
 
     print(f"""
   ESP32-CAM :  http://{ip}:{port}
@@ -128,7 +128,7 @@ def menu_configurar(cfg: dict[str, str]) -> None:
         _save_env("ESP32_PORT", new_port)
 
     # Prefix de comandos de texto
-    new_prefix = _prompt("Prefix del bot (ej. ! o $ o >>)", cfg.get("COMMAND_PREFIX", "!"))
+    new_prefix = _prompt("Prefix del bot (ej. ! o $ o >>)", cfg.get("COMMAND_PREFIX", "w!"))
     if not new_prefix:
         new_prefix = "!"
     if new_prefix != cfg.get("COMMAND_PREFIX"):

@@ -57,6 +57,7 @@
 #define DEFAULT_PHOTOS_FOLDER "fotos_diarias"  // Nombre de carpeta raíz para fotos diarias
 #define TELEGRAM_PHOTOS_FOLDER "fotos_telegram"  // Carpeta para fotos tomadas por Telegram
 #define WEB_PHOTOS_FOLDER "fotos_web"            // Carpeta para fotos tomadas desde el dashboard web
+#define RECORDINGS_FOLDER "grabaciones"          // Carpeta para grabaciones de video
 
 // ============================================
 // LED FLASH

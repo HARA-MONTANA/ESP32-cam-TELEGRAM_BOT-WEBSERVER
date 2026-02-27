@@ -34,6 +34,7 @@ def _load_env() -> dict[str, str]:
         "DISCORD_TOKEN": "",
         "ESP32_IP": "192.168.1.100",
         "ESP32_PORT": "80",
+        "COMMAND_PREFIX": "!",
     }
     if ENV_FILE.exists():
         saved = dotenv_values(str(ENV_FILE))
@@ -70,10 +71,12 @@ def _print_menu(cfg: dict[str, str]) -> None:
     token_label = "Configurado ✓" if token_ok else "NO configurado ✗"
     ip = cfg.get("ESP32_IP", "?")
     port = cfg.get("ESP32_PORT", "80")
+    prefix = cfg.get("COMMAND_PREFIX", "!")
 
     print(f"""
   ESP32-CAM :  http://{ip}:{port}
   Bot Token :  {token_label}
+  Prefix    :  {prefix}
 
   ┌─────────────────────────────────────┐
   │  1. Configurar credenciales         │
@@ -123,6 +126,13 @@ def menu_configurar(cfg: dict[str, str]) -> None:
         new_port = cfg["ESP32_PORT"]
     if new_port != cfg.get("ESP32_PORT"):
         _save_env("ESP32_PORT", new_port)
+
+    # Prefix de comandos de texto
+    new_prefix = _prompt("Prefix del bot (ej. ! o $ o >>)", cfg.get("COMMAND_PREFIX", "!"))
+    if not new_prefix:
+        new_prefix = "!"
+    if new_prefix != cfg.get("COMMAND_PREFIX"):
+        _save_env("COMMAND_PREFIX", new_prefix)
 
     print(f"\n  ✓ Configuración guardada en {ENV_FILE}\n")
     input("  Pulsa Enter para volver al menú...")
@@ -247,11 +257,12 @@ def menu_ver_config(cfg: dict[str, str]) -> None:
     else:
         visible = "(no configurado)"
 
-    print(f"  Archivo .env : {ENV_FILE}")
-    print(f"  DISCORD_TOKEN: {visible}")
-    print(f"  ESP32_IP     : {cfg.get('ESP32_IP', '?')}")
-    print(f"  ESP32_PORT   : {cfg.get('ESP32_PORT', '?')}")
-    print(f"  Stream URL   : http://{cfg.get('ESP32_IP', '?')}:{cfg.get('ESP32_PORT', '80')}/stream")
+    print(f"  Archivo .env   : {ENV_FILE}")
+    print(f"  DISCORD_TOKEN  : {visible}")
+    print(f"  ESP32_IP       : {cfg.get('ESP32_IP', '?')}")
+    print(f"  ESP32_PORT     : {cfg.get('ESP32_PORT', '?')}")
+    print(f"  COMMAND_PREFIX : {cfg.get('COMMAND_PREFIX', '!')}")
+    print(f"  Stream URL     : http://{cfg.get('ESP32_IP', '?')}:{cfg.get('ESP32_PORT', '80')}/stream")
     print()
     input("  Pulsa Enter para volver al menú...")
 

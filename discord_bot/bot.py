@@ -8,12 +8,13 @@ Comandos disponibles (/comando o !comando):
   /fotodiaria    — Envía la foto automática del día (busca en SD, o captura en vivo)
   /video [seg]   — Graba N segundos del stream y envía el .mp4 (máx. 30 s)
   /estado        — Muestra RAM, WiFi, SD y uptime de la ESP32-CAM
-  /ayuda         — Muestra esta ayuda
+  /help          — Muestra esta ayuda
 
 Configuración (archivo .env):
-  DISCORD_TOKEN  — Token del bot de Discord (obligatorio)
-  ESP32_IP       — IP local de la cámara  (default: 192.168.1.100)
-  ESP32_PORT     — Puerto del servidor web (default: 80)
+  DISCORD_TOKEN   — Token del bot de Discord (obligatorio)
+  ESP32_IP        — IP local de la cámara  (default: 192.168.1.100)
+  ESP32_PORT      — Puerto del servidor web (default: 80)
+  COMMAND_PREFIX  — Prefijo para comandos de texto  (default: !)
 """
 
 import asyncio
@@ -37,6 +38,7 @@ log = logging.getLogger("esp32-discord-bot")
 DISCORD_TOKEN: str = ""
 ESP32_IP: str = "192.168.1.100"
 ESP32_PORT: str = "80"
+COMMAND_PREFIX: str = "!"
 
 MAX_VIDEO_SECONDS: int = 30
 REQUEST_TIMEOUT: int = 10
@@ -48,11 +50,12 @@ REQUEST_TIMEOUT: int = 10
 
 def _load_config() -> None:
     """Carga (o recarga) las variables de entorno desde el .env."""
-    global DISCORD_TOKEN, ESP32_IP, ESP32_PORT
+    global DISCORD_TOKEN, ESP32_IP, ESP32_PORT, COMMAND_PREFIX
     load_dotenv(override=True)
     DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
     ESP32_IP = os.getenv("ESP32_IP", "192.168.1.100")
     ESP32_PORT = os.getenv("ESP32_PORT", "80")
+    COMMAND_PREFIX = os.getenv("COMMAND_PREFIX", "!")
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +164,14 @@ def connection_error_embed() -> discord.Embed:
 
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+
+
+def _get_prefix(bot_instance, message) -> str:
+    """Devuelve el prefix actual; permite cambiarlo en caliente desde el menú."""
+    return COMMAND_PREFIX
+
+
+bot = commands.Bot(command_prefix=_get_prefix, intents=intents)
 
 
 @bot.event
@@ -401,17 +411,18 @@ async def cmd_estado(ctx: commands.Context) -> None:
 
 
 # ---------------------------------------------------------------------------
-# /ayuda
+# /help
 # ---------------------------------------------------------------------------
 
 
-@bot.hybrid_command(name="ayuda", description="Muestra todos los comandos del bot")
-async def cmd_ayuda(ctx: commands.Context) -> None:
+@bot.hybrid_command(name="help", description="Muestra todos los comandos del bot")
+async def cmd_help(ctx: commands.Context) -> None:
+    prefix = COMMAND_PREFIX
     embed = discord.Embed(
         title="Bot ESP32-CAM — Ayuda",
         description=(
             "Controla tu ESP32-CAM desde Discord.\n"
-            "Usa `/comando` (slash) o `!comando` (texto)."
+            f"Usa `/comando` (slash) o `{prefix}comando` (texto)."
         ),
         color=discord.Color.gold(),
     )
@@ -421,11 +432,11 @@ async def cmd_ayuda(ctx: commands.Context) -> None:
         ("/fotodiaria", "Foto automática del día (SD o captura en vivo)"),
         ("/video [segundos]", "Graba y envía un video (máx. 30 seg)"),
         ("/estado", "Estado del sistema: RAM, WiFi, uptime"),
-        ("/ayuda", "Muestra esta ayuda"),
+        ("/help", "Muestra esta ayuda"),
     ]
     for name, desc in cmds:
         embed.add_field(name=f"`{name}`", value=desc, inline=False)
-    embed.set_footer(text=f"ESP32-CAM  •  http://{ESP32_IP}:{ESP32_PORT}")
+    embed.set_footer(text=f"ESP32-CAM  •  http://{ESP32_IP}:{ESP32_PORT}  •  prefix: {prefix}")
     await ctx.send(embed=embed)
 
 

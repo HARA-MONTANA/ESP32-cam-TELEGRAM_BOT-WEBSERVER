@@ -100,11 +100,6 @@ void setup() {
         Serial.println();
     }
 
-    // SD_MMC.begin() activa SDMMC_SLOT_FLAG_INTERNAL_PULLUP, lo que reconfigura
-    // GPIO13 (DATA3 del periférico SDMMC) como INPUT con pullup a través del IOMUX,
-    // incluso en modo 1-bit. Hay que volver a forzar OUTPUT LOW para apagar el LED.
-    credentialsManager.releaseBypassPin();
-
     // Conectar WiFi
     Serial.println("[3/5] Conectando a WiFi...");
     setupWiFi();

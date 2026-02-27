@@ -1,0 +1,17 @@
+# Dependencias del bot de Discord para ESP32-CAM
+# Instalar con:  pip install -r requirements.txt
+
+# Discord.py 2.x — slash commands + comandos de texto
+discord.py>=2.3.2
+
+# Peticiones HTTP a la ESP32-CAM
+requests>=2.31.0
+
+# Variables de entorno desde .env
+python-dotenv>=1.0.0
+
+# OpenCV — grabación del stream MJPEG y escritura de .mp4
+opencv-python>=4.8.0
+
+# NumPy — decodificación de frames JPEG en memoria
+numpy>=1.24.0

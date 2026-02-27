@@ -36,11 +36,9 @@ bool CredentialsManager::isBypassButtonPressed() {
 }
 
 void CredentialsManager::releaseBypassPin() {
-    // Una vez que las credenciales están cargadas, el botón ya no es necesario.
-    // Configurar el pin como OUTPUT LOW para apagar cualquier LED que esté
-    // conectado entre GPIO13 y GND (el INPUT_PULLUP previo lo mantendría HIGH).
-    pinMode(BYPASS_BUTTON_PIN, OUTPUT);
-    digitalWrite(BYPASS_BUTTON_PIN, LOW);
+    // Dejar el pin como INPUT_PULLDOWN: el pull-down interno mantiene el pin
+    // en LOW sin necesidad de manejarlo como salida.
+    pinMode(BYPASS_BUTTON_PIN, INPUT_PULLDOWN);
 }
 
 bool CredentialsManager::hasStoredCredentials() {

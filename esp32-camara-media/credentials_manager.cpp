@@ -15,8 +15,11 @@ CredentialsManager::CredentialsManager() : credentialsLoaded(false) {
 }
 
 void CredentialsManager::init() {
-    // Configurar pin del botón como entrada con pull-up
-    pinMode(BYPASS_BUTTON_PIN, INPUT_PULLUP);
+    // Inicializar GPIO13 como OUTPUT LOW desde el arranque para que cualquier
+    // LED conectado entre GPIO13 y GND permanezca apagado. Se cambiará a
+    // INPUT_PULLUP justo antes de necesitar leer el botón en requestCredentials().
+    pinMode(BYPASS_BUTTON_PIN, OUTPUT);
+    digitalWrite(BYPASS_BUTTON_PIN, LOW);
 
     // Cargar credenciales guardadas
     loadCredentials();
@@ -349,6 +352,10 @@ bool CredentialsManager::requestTimezone(long& offset, long savedOffset, bool* b
 }
 
 bool CredentialsManager::requestCredentials() {
+    // Activar INPUT_PULLUP ahora que necesitamos leer el botón.
+    // init() lo dejó en OUTPUT LOW para que el LED estuviera apagado durante la carga.
+    pinMode(BYPASS_BUTTON_PIN, INPUT_PULLUP);
+
     Serial.println("\n========================================");
     Serial.println("  CONFIGURACION DE CREDENCIALES");
     Serial.println("========================================");

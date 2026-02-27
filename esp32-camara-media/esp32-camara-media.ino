@@ -77,8 +77,8 @@ void setup() {
         ESP.restart();
     }
 
-    // No-op: el botón está en GPIO13, que no interfiere con SD_MMC en modo
-    // 1-bit. INPUT_PULLUP puede permanecer activo sin causar parpadeo.
+    // Liberar GPIO13: vuelve a OUTPUT LOW para apagar cualquier LED conectado
+    // entre ese pin y GND (requestCredentials() lo puso en INPUT_PULLUP).
     credentialsManager.releaseBypassPin();
 
     // Inicializar camara

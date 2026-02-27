@@ -47,8 +47,7 @@ public:
     // Verificar si el botón de bypass está presionado (con debounce)
     bool isBypassButtonPressed();
 
-    // Libera el pin del botón tras cargar las credenciales: lo deja en INPUT_PULLUP
-    // para apagar el LED (circuito: 5V──[LED]──GPIO13──[botón]──GND).
+    // Libera el pin del botón tras cargar las credenciales: lo deja en INPUT_PULLUP.
     void releaseBypassPin();
 
     // Verificar si hay credenciales guardadas

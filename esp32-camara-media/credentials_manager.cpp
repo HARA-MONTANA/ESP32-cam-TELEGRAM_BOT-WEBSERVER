@@ -15,11 +15,9 @@ CredentialsManager::CredentialsManager() : credentialsLoaded(false) {
 }
 
 void CredentialsManager::init() {
-    // Inicializar GPIO13 como INPUT_PULLUP desde el arranque.
-    // Circuito: 5V ──[LED]── GPIO13 ──[botón]── GND
-    // Con INPUT_PULLUP (~3.3V): el LED recibe solo 5V-3.3V=1.7V → por debajo
-    // del Vf de LEDs estándar → LED apagado. Cuando se presiona el botón,
-    // GPIO13 es jalado a GND y el pin lee LOW correctamente.
+    // Circuito: GPIO13 ──[botón]── GND
+    // INPUT_PULLUP: pull-up interno mantiene el pin en HIGH en reposo.
+    // Al presionar el botón, el pin es jalado a GND y se lee LOW.
     pinMode(BYPASS_BUTTON_PIN, INPUT_PULLUP);
 
     // Cargar credenciales guardadas
@@ -37,9 +35,7 @@ bool CredentialsManager::isBypassButtonPressed() {
 }
 
 void CredentialsManager::releaseBypassPin() {
-    // Mantener INPUT_PULLUP: con el circuito 5V──[LED]──GPIO13──[botón]──GND,
-    // el pull-up interno (~3.3V) mantiene el LED apagado (1.7V < Vf).
-    // INPUT_PULLDOWN pondría GPIO13 a ~0V y encendería el LED permanentemente.
+    // Mantener INPUT_PULLUP: pin en HIGH en reposo, listo si se reutiliza.
     pinMode(BYPASS_BUTTON_PIN, INPUT_PULLUP);
 }
 
@@ -352,8 +348,7 @@ bool CredentialsManager::requestTimezone(long& offset, long savedOffset, bool* b
 }
 
 bool CredentialsManager::requestCredentials() {
-    // Activar INPUT_PULLUP ahora que necesitamos leer el botón.
-    // init() lo dejó en OUTPUT LOW para que el LED estuviera apagado durante la carga.
+    // Asegurar INPUT_PULLUP para lectura del botón (ya configurado en init()).
     pinMode(BYPASS_BUTTON_PIN, INPUT_PULLUP);
 
     Serial.println("\n========================================");

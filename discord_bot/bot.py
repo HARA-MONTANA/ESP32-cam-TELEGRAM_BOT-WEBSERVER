@@ -1,96 +1,80 @@
 """
-Discord Bot para ESP32-CAM
-==========================
-Bot de Discord que se conecta a la ESP32-CAM vía HTTP para capturar
-imágenes y enviarlas a un canal de Discord.
+Bot de Discord para ESP32-CAM
+==============================
+Comandos disponibles (/comando o !comando):
 
-Comandos disponibles (slash / y prefijo !):
-  /foto            - Captura una imagen y la envía al chat
-  /foto_flash      - Captura con flash activado
-  /guardar         - Captura y guarda en la tarjeta SD de la cámara
-  /estado          - Muestra el estado del sistema (RAM, WiFi, SD)
-  /stream          - Muestra la URL del stream de video en vivo
-  /flash on|off    - Enciende o apaga el flash LED (GPIO4)
-  /fotos           - Lista las fotos guardadas en la SD
-  /ip              - Muestra la IP configurada de la ESP32-CAM
-  /configurar      - Cambia la IP/puerto de la ESP32-CAM (solo admins)
-  /ayuda           - Muestra esta ayuda
+  /foto          — Captura y envía una imagen en vivo
+  /foto_flash    — Captura con el flash LED encendido (GPIO4)
+  /fotodiaria    — Envía la foto automática del día (busca en SD, o captura en vivo)
+  /video [seg]   — Graba N segundos del stream y envía el .mp4 (máx. 30 s)
+  /estado        — Muestra RAM, WiFi, SD y uptime de la ESP32-CAM
+  /ayuda         — Muestra esta ayuda
 
-Configuración (.env):
-  DISCORD_TOKEN    - Token del bot de Discord (obligatorio)
-  ESP32_IP         - IP local de la ESP32-CAM (default: 192.168.1.100)
-  ESP32_PORT       - Puerto del servidor web (default: 80)
-  COMMAND_PREFIX   - Prefijo para comandos de texto (default: !)
+Configuración (archivo .env):
+  DISCORD_TOKEN  — Token del bot de Discord (obligatorio)
+  ESP32_IP       — IP local de la cámara  (default: 192.168.1.100)
+  ESP32_PORT     — Puerto del servidor web (default: 80)
 """
 
-import os
+import asyncio
 import io
-import json
 import logging
-from datetime import datetime
+import os
+import tempfile
+from datetime import date, datetime
 
 import discord
+import requests
 from discord import app_commands
 from discord.ext import commands
-import requests
 from dotenv import load_dotenv
 
-# ---------------------------------------------------------------------------
-# Configuración inicial
-# ---------------------------------------------------------------------------
+from recorder import record_stream
 
-load_dotenv()
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 log = logging.getLogger("esp32-discord-bot")
 
-DISCORD_TOKEN: str = os.getenv("DISCORD_TOKEN", "")
-ESP32_IP: str = os.getenv("ESP32_IP", "192.168.1.100")
-ESP32_PORT: str = os.getenv("ESP32_PORT", "80")
-COMMAND_PREFIX: str = os.getenv("COMMAND_PREFIX", "!")
-REQUEST_TIMEOUT: int = 10  # segundos
+# Valores de configuración — se rellenan en run() con _load_config()
+DISCORD_TOKEN: str = ""
+ESP32_IP: str = "192.168.1.100"
+ESP32_PORT: str = "80"
 
-if not DISCORD_TOKEN:
-    raise SystemExit(
-        "ERROR: Falta DISCORD_TOKEN en el archivo .env\n"
-        "Copia .env.example a .env y completa el token."
-    )
+MAX_VIDEO_SECONDS: int = 30
+REQUEST_TIMEOUT: int = 10
 
 # ---------------------------------------------------------------------------
-# Helpers de conexión a la ESP32-CAM
+# Configuración
+# ---------------------------------------------------------------------------
+
+
+def _load_config() -> None:
+    """Carga (o recarga) las variables de entorno desde el .env."""
+    global DISCORD_TOKEN, ESP32_IP, ESP32_PORT
+    load_dotenv(override=True)
+    DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
+    ESP32_IP = os.getenv("ESP32_IP", "192.168.1.100")
+    ESP32_PORT = os.getenv("ESP32_PORT", "80")
+
+
+# ---------------------------------------------------------------------------
+# Helpers HTTP → ESP32-CAM
 # ---------------------------------------------------------------------------
 
 
 def esp32_url(path: str = "") -> str:
-    """Devuelve la URL base de la ESP32-CAM con la ruta indicada."""
     return f"http://{ESP32_IP}:{ESP32_PORT}{path}"
 
 
 def capture_image(flash: bool = False) -> bytes | None:
-    """
-    Captura una imagen de la ESP32-CAM.
-
-    Primero activa el flash si se solicita, luego llama al endpoint /capture
-    y finalmente apaga el flash.
-
-    Returns:
-        bytes con el JPEG capturado, o None si hay error.
-    """
+    """Captura un JPEG desde /capture. Activa el flash si se indica."""
     if flash:
         _set_flash("on")
-
     try:
-        response = requests.get(esp32_url("/capture"), timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        content_type = response.headers.get("content-type", "")
-        if "image" not in content_type:
-            log.warning("Respuesta inesperada de /capture: %s", content_type)
-            return None
-        return response.content
+        r = requests.get(esp32_url("/capture"), timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        if "image" in r.headers.get("content-type", ""):
+            return r.content
+        log.warning("Respuesta de /capture no es imagen: %s", r.headers.get("content-type"))
+        return None
     except requests.RequestException as exc:
         log.error("Error capturando imagen: %s", exc)
         return None
@@ -99,112 +83,96 @@ def capture_image(flash: bool = False) -> bytes | None:
             _set_flash("off")
 
 
-def _set_flash(state: str) -> bool:
-    """
-    Envía el comando de flash a la ESP32-CAM.
-
-    La cámara expone /flash?state=on|off desde web_server.cpp.
-    Devuelve True si tuvo éxito.
-    """
+def _set_flash(state: str) -> None:
+    """Envía el comando de flash al endpoint /flash?state=on|off."""
     try:
-        response = requests.get(
-            esp32_url(f"/flash?state={state}"), timeout=5
-        )
-        return response.status_code == 200
-    except requests.RequestException as exc:
-        log.warning("No se pudo controlar el flash (%s): %s", state, exc)
-        return False
+        requests.get(esp32_url(f"/flash?state={state}"), timeout=5)
+    except requests.RequestException:
+        pass  # No bloquear si el flash falla
 
 
 def get_status() -> dict | None:
-    """Obtiene el estado del sistema desde /status."""
+    """Consulta /status y devuelve el JSON del sistema."""
     try:
-        response = requests.get(esp32_url("/status"), timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as exc:
+        r = requests.get(esp32_url("/status"), timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        return r.json()
+    except Exception as exc:
         log.error("Error obteniendo estado: %s", exc)
         return None
-    except json.JSONDecodeError:
-        log.error("Respuesta de /status no es JSON válido")
-        return None
 
 
-def save_to_sd() -> dict | None:
-    """Captura y guarda en la SD usando /web-capture."""
+def get_daily_photo() -> tuple[bytes | None, str]:
+    """
+    Intenta obtener la foto diaria de hoy desde la SD (/photos).
+    Si no la encuentra, hace una captura en vivo como fallback.
+
+    Returns:
+        (bytes de la imagen, nombre de archivo)
+    """
+    today_str = date.today().strftime("%Y-%m-%d")
+    fallback_name = f"fotodiaria_{today_str}.jpg"
+
     try:
-        response = requests.get(esp32_url("/web-capture"), timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        # La respuesta puede ser JSON con info del archivo guardado
-        try:
-            return response.json()
-        except json.JSONDecodeError:
-            return {"ok": True}
-    except requests.RequestException as exc:
-        log.error("Error guardando en SD: %s", exc)
-        return None
+        r = requests.get(esp32_url("/photos"), timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+        photos = data if isinstance(data, list) else data.get("photos", [])
 
+        # Buscar la foto de hoy en la carpeta de fotos diarias
+        for photo in photos:
+            name = photo.get("name", "") if isinstance(photo, dict) else str(photo)
+            if today_str in name and "diaria" in name.lower():
+                photo_r = requests.get(
+                    esp32_url(f"/photo?name={name}"), timeout=REQUEST_TIMEOUT
+                )
+                if photo_r.status_code == 200 and "image" in photo_r.headers.get(
+                    "content-type", ""
+                ):
+                    log.info("Foto diaria encontrada en SD: %s", name)
+                    return photo_r.content, name
+    except Exception as exc:
+        log.warning("No se pudo acceder a /photos, usando captura en vivo: %s", exc)
 
-def list_photos() -> list[dict] | None:
-    """Lista las fotos guardadas en la SD desde /photos."""
-    try:
-        response = requests.get(esp32_url("/photos"), timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        data = response.json()
-        # El endpoint devuelve lista de fotos o un objeto con clave "photos"
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict) and "photos" in data:
-            return data["photos"]
-        return []
-    except requests.RequestException as exc:
-        log.error("Error listando fotos: %s", exc)
-        return None
-    except json.JSONDecodeError:
-        log.error("Respuesta de /photos no es JSON válido")
-        return None
+    # Fallback: captura en vivo
+    log.info("Haciendo captura en vivo como foto diaria")
+    return capture_image(), fallback_name
 
 
 # ---------------------------------------------------------------------------
-# Embeds reutilizables
+# Embeds de error
 # ---------------------------------------------------------------------------
 
 
-def error_embed(message: str) -> discord.Embed:
-    return discord.Embed(
-        title="Error",
-        description=message,
-        color=discord.Color.red(),
-    )
+def error_embed(msg: str) -> discord.Embed:
+    return discord.Embed(title="Error", description=msg, color=discord.Color.red())
 
 
 def connection_error_embed() -> discord.Embed:
     return error_embed(
         f"No se puede conectar a la ESP32-CAM en `{ESP32_IP}:{ESP32_PORT}`.\n"
-        "Verifica que la cámara esté encendida y en la misma red."
+        "Verifica que la cámara esté encendida y en la misma red WiFi."
     )
 
 
 # ---------------------------------------------------------------------------
-# Bot
+# Instancia del bot
 # ---------------------------------------------------------------------------
 
 intents = discord.Intents.default()
 intents.message_content = True
-
-bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 @bot.event
 async def on_ready() -> None:
     log.info("Bot conectado como %s (ID: %s)", bot.user, bot.user.id)
-    log.info("ESP32-CAM configurada en http://%s:%s", ESP32_IP, ESP32_PORT)
+    log.info("ESP32-CAM → http://%s:%s", ESP32_IP, ESP32_PORT)
     try:
         synced = await bot.tree.sync()
         log.info("Sincronizados %d comandos slash", len(synced))
     except Exception as exc:
-        log.error("Error sincronizando comandos slash: %s", exc)
-
+        log.error("Error sincronizando comandos: %s", exc)
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.watching,
@@ -214,7 +182,7 @@ async def on_ready() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Comando: /foto
+# /foto
 # ---------------------------------------------------------------------------
 
 
@@ -222,103 +190,163 @@ async def on_ready() -> None:
 async def cmd_foto(ctx: commands.Context) -> None:
     await ctx.defer()
 
-    image_data = capture_image(flash=False)
-    if image_data is None:
+    data = capture_image()
+    if data is None:
         await ctx.send(embed=connection_error_embed())
         return
 
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"esp32cam_{timestamp}.jpg"
-
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"esp32cam_{ts}.jpg"
     embed = discord.Embed(
         title="Foto ESP32-CAM",
         description=datetime.now().strftime("Capturada el %d/%m/%Y a las %H:%M:%S"),
         color=discord.Color.green(),
     )
     embed.set_image(url=f"attachment://{filename}")
-    embed.set_footer(text=f"ESP32-CAM  •  {ESP32_IP}:{ESP32_PORT}")
-
-    await ctx.send(
-        embed=embed,
-        file=discord.File(io.BytesIO(image_data), filename=filename),
-    )
+    embed.set_footer(text=f"{ESP32_IP}:{ESP32_PORT}")
+    await ctx.send(embed=embed, file=discord.File(io.BytesIO(data), filename=filename))
 
 
 # ---------------------------------------------------------------------------
-# Comando: /foto_flash
+# /foto_flash
 # ---------------------------------------------------------------------------
 
 
 @bot.hybrid_command(
     name="foto_flash",
-    description="Captura una imagen con el flash LED activado",
+    description="Captura una imagen con el flash LED encendido (GPIO4)",
 )
 async def cmd_foto_flash(ctx: commands.Context) -> None:
     await ctx.defer()
 
-    image_data = capture_image(flash=True)
-    if image_data is None:
+    data = capture_image(flash=True)
+    if data is None:
         await ctx.send(embed=connection_error_embed())
         return
 
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"esp32cam_flash_{timestamp}.jpg"
-
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"esp32cam_flash_{ts}.jpg"
     embed = discord.Embed(
-        title="Foto ESP32-CAM (con flash)",
+        title="Foto ESP32-CAM — Flash",
         description=datetime.now().strftime("Capturada el %d/%m/%Y a las %H:%M:%S"),
         color=discord.Color.yellow(),
     )
     embed.set_image(url=f"attachment://{filename}")
-    embed.set_footer(text=f"Flash activado  •  {ESP32_IP}:{ESP32_PORT}")
-
-    await ctx.send(
-        embed=embed,
-        file=discord.File(io.BytesIO(image_data), filename=filename),
-    )
+    embed.set_footer(text=f"Flash encendido  •  {ESP32_IP}:{ESP32_PORT}")
+    await ctx.send(embed=embed, file=discord.File(io.BytesIO(data), filename=filename))
 
 
 # ---------------------------------------------------------------------------
-# Comando: /guardar
+# /fotodiaria
 # ---------------------------------------------------------------------------
 
 
 @bot.hybrid_command(
-    name="guardar",
-    description="Captura una imagen y la guarda en la tarjeta SD de la cámara",
+    name="fotodiaria",
+    description="Envía la foto automática del día (busca en SD, o captura en vivo)",
 )
-async def cmd_guardar(ctx: commands.Context) -> None:
+async def cmd_fotodiaria(ctx: commands.Context) -> None:
     await ctx.defer()
 
-    result = save_to_sd()
-    if result is None:
+    data, filename = get_daily_photo()
+    if data is None:
         await ctx.send(embed=connection_error_embed())
         return
 
-    embed = discord.Embed(
-        title="Foto guardada en SD",
-        color=discord.Color.blurple(),
-    )
-    embed.add_field(
-        name="Timestamp",
-        value=datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-        inline=False,
-    )
-    if isinstance(result, dict) and "filename" in result:
-        embed.add_field(name="Archivo", value=result["filename"], inline=False)
-    embed.set_footer(text=f"ESP32-CAM  •  {ESP32_IP}:{ESP32_PORT}")
+    today = date.today().strftime("%d/%m/%Y")
+    from_sd = "diaria" in filename.lower() and date.today().strftime("%Y-%m-%d") in filename
+    source = "Recuperada de la tarjeta SD" if from_sd else "Captura en vivo (no hay foto guardada hoy)"
 
-    await ctx.send(embed=embed)
+    embed = discord.Embed(
+        title=f"Foto diaria — {today}",
+        description=source,
+        color=discord.Color.orange(),
+    )
+    embed.set_image(url=f"attachment://{filename}")
+    embed.set_footer(text=f"ESP32-CAM  •  {ESP32_IP}:{ESP32_PORT}")
+    await ctx.send(embed=embed, file=discord.File(io.BytesIO(data), filename=filename))
 
 
 # ---------------------------------------------------------------------------
-# Comando: /estado
+# /video
+# ---------------------------------------------------------------------------
+
+
+@bot.hybrid_command(
+    name="video",
+    description="Graba un video desde el stream MJPEG y lo envía (máx. 30 segundos)",
+)
+@app_commands.describe(segundos="Duración del video en segundos (1–30, default 10)")
+async def cmd_video(ctx: commands.Context, segundos: int = 10) -> None:
+    # Validar rango
+    segundos = max(1, min(segundos, MAX_VIDEO_SECONDS))
+
+    await ctx.defer()
+    aviso = await ctx.send(
+        f"Grabando {segundos} segundo{'s' if segundos > 1 else ''} de video..."
+    )
+
+    stream_url = esp32_url("/stream")
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    tmp_path = os.path.join(tempfile.gettempdir(), f"esp32cam_{ts}.mp4")
+
+    # Grabar en un hilo separado para no bloquear el event loop de Discord
+    loop = asyncio.get_running_loop()
+    success = await loop.run_in_executor(
+        None, record_stream, stream_url, segundos, tmp_path, None
+    )
+
+    # Borrar el mensaje de aviso
+    try:
+        await aviso.delete()
+    except discord.HTTPException:
+        pass
+
+    if not success:
+        await ctx.send(
+            embed=error_embed(
+                f"No se pudo grabar el video desde `{stream_url}`.\n"
+                "Verifica que el stream esté activo y la cámara accesible."
+            )
+        )
+        return
+
+    file_size = os.path.getsize(tmp_path)
+    max_size = 25 * 1024 * 1024  # 25 MB — límite de Discord sin boost
+
+    if file_size > max_size:
+        os.remove(tmp_path)
+        await ctx.send(
+            embed=error_embed(
+                f"El video ({file_size / 1024 / 1024:.1f} MB) supera el límite de Discord (25 MB).\n"
+                "Reduce la duración con `/video <segundos>`."
+            )
+        )
+        return
+
+    embed = discord.Embed(
+        title=f"Video ESP32-CAM — {segundos}s",
+        description=datetime.now().strftime("Grabado el %d/%m/%Y a las %H:%M:%S"),
+        color=discord.Color.purple(),
+    )
+    embed.set_footer(
+        text=f"{ESP32_IP}:{ESP32_PORT}  •  {file_size / 1024:.0f} KB"
+    )
+
+    with open(tmp_path, "rb") as f:
+        await ctx.send(embed=embed, file=discord.File(f, filename=f"esp32cam_{ts}.mp4"))
+
+    os.remove(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# /estado
 # ---------------------------------------------------------------------------
 
 
 @bot.hybrid_command(
     name="estado",
-    description="Muestra el estado del sistema de la ESP32-CAM (RAM, WiFi, SD)",
+    description="Muestra el estado del sistema: RAM, WiFi, SD y uptime",
 )
 async def cmd_estado(ctx: commands.Context) -> None:
     await ctx.defer()
@@ -346,284 +374,77 @@ async def cmd_estado(ctx: commands.Context) -> None:
     # WiFi
     rssi = status.get("wifi_rssi") or status.get("rssi")
     if rssi is not None:
-        signal = (
-            "Excelente" if rssi > -60
-            else "Buena" if rssi > -70
-            else "Regular" if rssi > -80
-            else "Débil"
-        )
-        embed.add_field(
-            name="Señal WiFi", value=f"{rssi} dBm ({signal})", inline=True
-        )
+        if rssi > -60:
+            signal = "Excelente"
+        elif rssi > -70:
+            signal = "Buena"
+        elif rssi > -80:
+            signal = "Regular"
+        else:
+            signal = "Débil"
+        embed.add_field(name="Señal WiFi", value=f"{rssi} dBm ({signal})", inline=True)
 
     ssid = status.get("wifi_ssid") or status.get("ssid")
     if ssid:
         embed.add_field(name="Red WiFi", value=ssid, inline=True)
 
-    # SD Card
-    sd_total = status.get("sd_total")
-    sd_used = status.get("sd_used")
-    sd_free = status.get("sd_free")
-    if sd_total is not None:
-        embed.add_field(name="SD Total", value=f"{sd_total} MB", inline=True)
-    if sd_used is not None:
-        embed.add_field(name="SD Usada", value=f"{sd_used} MB", inline=True)
-    if sd_free is not None:
-        embed.add_field(name="SD Libre", value=f"{sd_free} MB", inline=True)
-
-    # Uptime / hora
+    # Uptime
     uptime = status.get("uptime")
     if uptime is not None:
-        hours, rem = divmod(int(uptime), 3600)
-        mins, secs = divmod(rem, 60)
-        embed.add_field(
-            name="Tiempo encendida",
-            value=f"{hours}h {mins}m {secs}s",
-            inline=True,
-        )
+        h, rem = divmod(int(uptime), 3600)
+        m, s = divmod(rem, 60)
+        embed.add_field(name="Tiempo encendida", value=f"{h}h {m}m {s}s", inline=True)
 
     embed.add_field(name="IP", value=f"`{ESP32_IP}`", inline=False)
     embed.set_footer(text="Datos en tiempo real de la ESP32-CAM")
-
     await ctx.send(embed=embed)
 
 
 # ---------------------------------------------------------------------------
-# Comando: /stream
+# /ayuda
 # ---------------------------------------------------------------------------
 
 
-@bot.hybrid_command(
-    name="stream",
-    description="Muestra la URL del stream de video en vivo de la ESP32-CAM",
-)
-async def cmd_stream(ctx: commands.Context) -> None:
-    stream_url = esp32_url("/stream")
-    dashboard_url = esp32_url("/")
-
-    embed = discord.Embed(
-        title="Stream de video — ESP32-CAM",
-        description="Abre la URL en tu navegador para ver el video en vivo (MJPEG).",
-        color=discord.Color.red(),
-    )
-    embed.add_field(name="Stream directo", value=f"`{stream_url}`", inline=False)
-    embed.add_field(name="Panel de control", value=f"`{dashboard_url}`", inline=False)
-    embed.add_field(
-        name="Nota",
-        value=(
-            "Discord no puede mostrar streams MJPEG directamente.\n"
-            "Usa el comando `/foto` para recibir imágenes individuales."
-        ),
-        inline=False,
-    )
-    embed.set_footer(text=f"ESP32-CAM  •  {ESP32_IP}:{ESP32_PORT}")
-
-    await ctx.send(embed=embed)
-
-
-# ---------------------------------------------------------------------------
-# Comando: /flash
-# ---------------------------------------------------------------------------
-
-
-@bot.hybrid_command(
-    name="flash",
-    description="Enciende o apaga el flash LED de la ESP32-CAM (GPIO4)",
-)
-@app_commands.describe(estado="on para encender, off para apagar")
-@app_commands.choices(
-    estado=[
-        app_commands.Choice(name="Encender", value="on"),
-        app_commands.Choice(name="Apagar", value="off"),
-    ]
-)
-async def cmd_flash(ctx: commands.Context, estado: str) -> None:
-    await ctx.defer()
-
-    success = _set_flash(estado)
-
-    if success:
-        emoji = "💡" if estado == "on" else "🌑"
-        embed = discord.Embed(
-            title=f"{emoji} Flash {estado.upper()}",
-            description=f"El flash LED ha sido {'encendido' if estado == 'on' else 'apagado'}.",
-            color=discord.Color.yellow() if estado == "on" else discord.Color.dark_gray(),
-        )
-    else:
-        embed = error_embed(
-            f"No se pudo {'encender' if estado == 'on' else 'apagar'} el flash.\n"
-            "Verifica que la ESP32-CAM esté conectada y que el endpoint `/flash` esté disponible."
-        )
-
-    await ctx.send(embed=embed)
-
-
-# ---------------------------------------------------------------------------
-# Comando: /fotos
-# ---------------------------------------------------------------------------
-
-
-@bot.hybrid_command(
-    name="fotos",
-    description="Lista las últimas fotos guardadas en la tarjeta SD",
-)
-async def cmd_fotos(ctx: commands.Context) -> None:
-    await ctx.defer()
-
-    photos = list_photos()
-    if photos is None:
-        await ctx.send(embed=connection_error_embed())
-        return
-
-    if not photos:
-        await ctx.send(
-            embed=discord.Embed(
-                title="Fotos en SD",
-                description="No hay fotos guardadas en la tarjeta SD.",
-                color=discord.Color.light_gray(),
-            )
-        )
-        return
-
-    # Mostrar máximo 15 fotos para no saturar el embed
-    shown = photos[:15]
-    lines = []
-    for i, photo in enumerate(shown, start=1):
-        name = photo.get("name") or photo.get("filename") or str(photo)
-        size = photo.get("size")
-        line = f"`{i:02d}.` {name}"
-        if size:
-            line += f"  ({size})"
-        lines.append(line)
-
-    embed = discord.Embed(
-        title=f"Fotos en SD ({len(photos)} total)",
-        description="\n".join(lines),
-        color=discord.Color.blurple(),
-    )
-    if len(photos) > 15:
-        embed.set_footer(text=f"Mostrando las últimas 15 de {len(photos)} fotos.")
-
-    await ctx.send(embed=embed)
-
-
-# ---------------------------------------------------------------------------
-# Comando: /ip
-# ---------------------------------------------------------------------------
-
-
-@bot.hybrid_command(
-    name="ip",
-    description="Muestra la IP y puerto configurados de la ESP32-CAM",
-)
-async def cmd_ip(ctx: commands.Context) -> None:
-    embed = discord.Embed(
-        title="Dirección ESP32-CAM",
-        color=discord.Color.teal(),
-    )
-    embed.add_field(name="IP", value=f"`{ESP32_IP}`", inline=True)
-    embed.add_field(name="Puerto", value=f"`{ESP32_PORT}`", inline=True)
-    embed.add_field(
-        name="URL base",
-        value=f"`http://{ESP32_IP}:{ESP32_PORT}`",
-        inline=False,
-    )
-    embed.set_footer(text="Usa /configurar para cambiar la IP (solo administradores).")
-    await ctx.send(embed=embed)
-
-
-# ---------------------------------------------------------------------------
-# Comando: /configurar  (solo administradores del servidor)
-# ---------------------------------------------------------------------------
-
-
-@bot.hybrid_command(
-    name="configurar",
-    description="Cambia la IP y puerto de la ESP32-CAM (solo administradores)",
-)
-@app_commands.describe(
-    ip="Nueva dirección IP de la ESP32-CAM (ej. 192.168.1.50)",
-    puerto="Puerto del servidor web (por defecto 80)",
-)
-@commands.has_permissions(administrator=True)
-async def cmd_configurar(
-    ctx: commands.Context, ip: str, puerto: int = 80
-) -> None:
-    global ESP32_IP, ESP32_PORT
-    old_ip, old_port = ESP32_IP, ESP32_PORT
-    ESP32_IP = ip
-    ESP32_PORT = str(puerto)
-
-    embed = discord.Embed(
-        title="Configuración actualizada",
-        color=discord.Color.green(),
-    )
-    embed.add_field(name="Anterior", value=f"`{old_ip}:{old_port}`", inline=True)
-    embed.add_field(name="Nueva", value=f"`{ESP32_IP}:{ESP32_PORT}`", inline=True)
-    embed.set_footer(
-        text="Nota: Este cambio es temporal. Para hacerlo permanente, edita el .env."
-    )
-    await ctx.send(embed=embed)
-
-    # Actualizar estado del bot
-    await bot.change_presence(
-        activity=discord.Activity(
-            type=discord.ActivityType.watching,
-            name=f"ESP32-CAM @ {ESP32_IP}",
-        )
-    )
-
-
-@cmd_configurar.error
-async def configurar_error(ctx: commands.Context, error: Exception) -> None:
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.send(
-            embed=error_embed("Solo los administradores del servidor pueden usar este comando.")
-        )
-
-
-# ---------------------------------------------------------------------------
-# Comando: /ayuda
-# ---------------------------------------------------------------------------
-
-
-@bot.hybrid_command(
-    name="ayuda",
-    description="Muestra todos los comandos disponibles del bot",
-)
+@bot.hybrid_command(name="ayuda", description="Muestra todos los comandos del bot")
 async def cmd_ayuda(ctx: commands.Context) -> None:
     embed = discord.Embed(
-        title="Bot ESP32-CAM para Discord",
+        title="Bot ESP32-CAM — Ayuda",
         description=(
-            "Controla tu cámara ESP32-CAM directamente desde Discord.\n"
-            f"Puedes usar `/comando` o `{COMMAND_PREFIX}comando`."
+            "Controla tu ESP32-CAM desde Discord.\n"
+            "Usa `/comando` (slash) o `!comando` (texto)."
         ),
         color=discord.Color.gold(),
     )
-
     cmds = [
-        ("/foto", "Captura una imagen y la envía al chat"),
-        ("/foto_flash", "Captura una imagen con el flash encendido"),
-        ("/guardar", "Captura y guarda la imagen en la tarjeta SD"),
-        ("/estado", "Estado del sistema: RAM, WiFi, SD"),
-        ("/stream", "URL del stream de video en vivo"),
-        ("/flash on|off", "Enciende o apaga el flash LED"),
-        ("/fotos", "Lista las fotos guardadas en la SD"),
-        ("/ip", "Muestra la IP configurada de la cámara"),
-        ("/configurar IP [puerto]", "Cambia la IP de la cámara (admin)"),
-        ("/ayuda", "Muestra este menú"),
+        ("/foto", "Captura y envía una imagen en vivo"),
+        ("/foto_flash", "Captura con el flash LED encendido"),
+        ("/fotodiaria", "Foto automática del día (SD o captura en vivo)"),
+        ("/video [segundos]", "Graba y envía un video (máx. 30 seg)"),
+        ("/estado", "Estado del sistema: RAM, WiFi, uptime"),
+        ("/ayuda", "Muestra esta ayuda"),
     ]
-
     for name, desc in cmds:
         embed.add_field(name=f"`{name}`", value=desc, inline=False)
-
-    embed.set_footer(text=f"ESP32-CAM conectada en http://{ESP32_IP}:{ESP32_PORT}")
+    embed.set_footer(text=f"ESP32-CAM  •  http://{ESP32_IP}:{ESP32_PORT}")
     await ctx.send(embed=embed)
 
 
 # ---------------------------------------------------------------------------
-# Punto de entrada
+# Punto de entrada (llamado desde main.py)
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+
+def run() -> None:
+    """Carga la configuración y arranca el bot. Llamar desde main.py."""
+    _load_config()
+    if not DISCORD_TOKEN:
+        raise SystemExit(
+            "ERROR: Falta DISCORD_TOKEN en el archivo .env\n"
+            "Ejecuta la opción 'Configurar credenciales' del menú."
+        )
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     bot.run(DISCORD_TOKEN, log_handler=None)

@@ -1,0 +1,15 @@
+# Variables de entorno con tokens y credenciales — NUNCA subir a Git
+discord_bot/.env
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db

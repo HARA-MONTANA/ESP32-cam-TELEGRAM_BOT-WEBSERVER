@@ -1,0 +1,11 @@
+# Dependencias del bot de Discord para ESP32-CAM
+# Instalar con: pip install -r requirements.txt
+
+# Discord.py 2.x — librería principal del bot (slash commands + prefijo)
+discord.py>=2.3.2
+
+# Requests — peticiones HTTP a la ESP32-CAM
+requests>=2.31.0
+
+# python-dotenv — carga variables de entorno desde el archivo .env
+python-dotenv>=1.0.0

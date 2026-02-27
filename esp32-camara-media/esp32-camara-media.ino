@@ -77,8 +77,8 @@ void setup() {
         ESP.restart();
     }
 
-    // Liberar GPIO13: vuelve a OUTPUT LOW para apagar cualquier LED conectado
-    // entre ese pin y GND (requestCredentials() lo puso en INPUT_PULLUP).
+    // Liberar GPIO13: vuelve a INPUT_PULLUP para mantener el LED apagado
+    // (circuito: 5V──[LED]──GPIO13──[botón]──GND).
     credentialsManager.releaseBypassPin();
 
     // Inicializar camara

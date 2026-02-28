@@ -132,7 +132,19 @@ void CameraWebServer::handleStream() {
 
 void CameraWebServer::handleWebCapture() {
     sleepManager.registerActivity();
-    camera_fb_t* fb = camera.capturePhoto();
+
+    // Parámetro opcional ?flash=1 / ?flash=0 (igual que en /capture)
+    camera_fb_t* fb;
+    if (server.hasArg("flash")) {
+        bool wantFlash = server.arg("flash") == "1";
+        CameraSettings saved = camera.getSettings();
+        camera.setFlash(wantFlash);
+        fb = camera.capturePhoto();
+        camera.setFlash(saved.flashEnabled);  // restaurar estado original
+    } else {
+        fb = camera.capturePhoto();
+    }
+
     if (!fb) {
         server.send(500, "text/plain", "Error al capturar imagen");
         return;
@@ -996,6 +1008,9 @@ String CameraWebServer::generateDashboardHTML() {
                         <span id="streamBtn">&#9654; Iniciar Stream</span>
                     </button>
                     <button class="btn btn-success" onclick="capturePhoto()">&#128248; Capturar Foto</button>
+                    <button class="btn" id="flashToggleBtn" onclick="toggleCaptureFlash()"
+                            style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,220,0,0.3);color:#888;min-width:auto;padding:12px 16px;"
+                            title="Activar/desactivar flash para la captura">&#9889; Sin Flash</button>
                 </div>
             </div>
 
@@ -1200,6 +1215,7 @@ String CameraWebServer::generateDashboardHTML() {
 
     <script>
         let streaming = false;
+        let captureFlash = false;
         let photoList = [];
         let currentPhotoIndex = -1;
         let currentFolder = 'fotos_web';
@@ -1237,9 +1253,28 @@ String CameraWebServer::generateDashboardHTML() {
             }
         }
 
+        function toggleCaptureFlash() {
+            captureFlash = !captureFlash;
+            const btn = document.getElementById('flashToggleBtn');
+            if (captureFlash) {
+                btn.innerHTML = '&#9889; Con Flash';
+                btn.style.background = 'linear-gradient(135deg,#e0c000,#a08000)';
+                btn.style.color = '#000';
+                btn.style.border = '1px solid rgba(255,220,0,0.6)';
+                btn.style.boxShadow = '0 0 10px rgba(255,220,0,0.4)';
+            } else {
+                btn.innerHTML = '&#9889; Sin Flash';
+                btn.style.background = 'rgba(255,255,255,0.07)';
+                btn.style.color = '#888';
+                btn.style.border = '1px solid rgba(255,220,0,0.3)';
+                btn.style.boxShadow = 'none';
+            }
+        }
+
         async function doCapture() {
             try {
-                const response = await fetch('/web-capture?' + Date.now());
+                const flashParam = captureFlash ? '&flash=1' : '&flash=0';
+                const response = await fetch('/web-capture?' + Date.now() + flashParam);
                 if (!response.ok) {
                     showToast('Error al capturar');
                     return;

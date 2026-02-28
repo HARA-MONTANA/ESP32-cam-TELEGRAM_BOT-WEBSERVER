@@ -55,7 +55,21 @@ void CameraWebServer::handleRoot() {
 
 void CameraWebServer::handleCapture() {
     sleepManager.registerActivity();
-    camera_fb_t* fb = camera.capturePhoto();
+
+    // Parámetro opcional ?flash=1 / ?flash=0
+    // Permite controlar el flash por captura sin modificar la configuración global del dashboard.
+    // Sin parámetro → comportamiento original (usa la configuración actual).
+    camera_fb_t* fb;
+    if (server.hasArg("flash")) {
+        bool wantFlash = server.arg("flash") == "1";
+        CameraSettings saved = camera.getSettings();
+        camera.setFlash(wantFlash);
+        fb = camera.capturePhoto();
+        camera.setFlash(saved.flashEnabled);  // restaurar estado original
+    } else {
+        fb = camera.capturePhoto();
+    }
+
     if (!fb) {
         server.send(500, "text/plain", "Error al capturar imagen");
         return;

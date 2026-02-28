@@ -348,6 +348,23 @@ def role_denied_embed() -> discord.Embed:
     return embed
 
 
+def _deactivate_role() -> discord.Embed:
+    """Pone REQUIRED_ROLE_ID a 0, guarda en .env y devuelve el embed de confirmación."""
+    global REQUIRED_ROLE_ID
+    REQUIRED_ROLE_ID = 0
+    _save_env("REQUIRED_ROLE_ID", "0")
+    embed = discord.Embed(
+        title="🔓  ROL REQUERIDO  ·  Desactivado",
+        description=(
+            "```ansi\n\u001b[1;34m◈ RESTRICCIÓN ELIMINADA\u001b[0m\n```"
+            "> El bot ahora está **abierto a todos** los miembros del servidor."
+        ),
+        color=CYBER_BLUE,
+    )
+    embed.set_footer(text=_cyber_footer())
+    return embed
+
+
 # ── Árbol slash con verificación de rol ──────────────────────────────────────
 
 class CyberTree(app_commands.CommandTree):
@@ -686,6 +703,24 @@ class SDView(discord.ui.View):
         )
 
 
+class RolView(discord.ui.View):
+    """Botón para desactivar la restricción de rol desde el embed de estado."""
+
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="Desactivar restricción", emoji="🔓", style=discord.ButtonStyle.danger)
+    async def deactivate(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not isinstance(interaction.user, discord.Member) or \
+                not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message(
+                embed=error_embed("Necesitas permisos de **Administrador** para esto."),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.edit_message(embed=_deactivate_role(), view=None)
+
+
 # ── Instancia del bot ─────────────────────────────────────────────────────────
 
 intents = discord.Intents.default()
@@ -721,6 +756,18 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
             embed=error_embed("Necesitas permisos de **Administrador** para este comando."),
             delete_after=12,
         )
+    elif isinstance(error, commands.RoleNotFound):
+        # w!rol off → el converter falla porque "off" no es un rol válido
+        if ctx.command and ctx.command.name == "rol" and \
+                error.argument.lower() in ("off", "none", "0", "libre", "todos", "sin"):
+            await ctx.send(embed=_deactivate_role())
+        else:
+            await ctx.send(
+                embed=error_embed(
+                    f"No se encontró el rol `{error.argument}`.\n"
+                    "▸ Usa @mención, ID numérico o nombre exacto."
+                )
+            )
 
 
 @bot.event
@@ -740,28 +787,34 @@ async def on_ready() -> None:
     )
 
 
-# ── w!rol ────────────────────────────────────────────────────────────────────
+# ── /rol ─────────────────────────────────────────────────────────────────────
 
-@bot.command(name="rol")
+@bot.hybrid_command(name="rol", description="🔐 Establece el rol necesario para usar el bot (solo admins)")
+@app_commands.describe(rol="Rol que tendrá acceso al bot. Deja vacío para ver el estado actual")
+@app_commands.default_permissions(administrator=True)
 @commands.has_permissions(administrator=True)
 @commands.guild_only()
-async def cmd_rol(ctx: commands.Context, *, arg: str = "") -> None:
+async def cmd_rol(ctx: commands.Context, rol: discord.Role | None = None) -> None:
     """
-    Establece o elimina el rol requerido para usar el bot.
-
-    Uso:
-      w!rol @rol       — restringe el bot a ese rol
-      w!rol off        — elimina la restricción (todos pueden usarlo)
-      w!rol            — muestra la configuración actual
+    Slash:  /rol           → muestra estado (botón Desactivar si hay uno activo)
+            /rol @rol      → activa restricción al rol elegido
+    Prefijo: w!rol         → muestra estado
+             w!rol @rol    → activa restricción
+             w!rol off     → desactiva restricción (manejado por on_command_error)
     """
     global REQUIRED_ROLE_ID
 
-    # Sin argumento → estado actual
-    if not arg:
+    if rol is None:
+        # Mostrar estado actual
         if REQUIRED_ROLE_ID == 0:
             desc = "> El bot está **abierto a todos** los miembros."
+            view = None
         else:
-            desc = f"> 🎭 **Rol activo:** <@&{REQUIRED_ROLE_ID}>\n> Solo ese rol puede interactuar con el bot."
+            desc = (
+                f"> 🎭 **Rol activo:** <@&{REQUIRED_ROLE_ID}>\n"
+                "> Solo ese rol puede interactuar con el bot."
+            )
+            view = RolView()
         embed = discord.Embed(
             title="🔐  ROL REQUERIDO  ·  Estado actual",
             description=(
@@ -770,58 +823,24 @@ async def cmd_rol(ctx: commands.Context, *, arg: str = "") -> None:
             ),
             color=CYBER_PURPLE,
         )
-        embed.set_footer(text=_cyber_footer(f"Cambia con: {COMMAND_PREFIX}rol @rol  ·  {COMMAND_PREFIX}rol off"))
-        await ctx.send(embed=embed)
+        embed.set_footer(text=_cyber_footer(f"{COMMAND_PREFIX}rol @rol  ·  {COMMAND_PREFIX}rol off"))
+        await ctx.send(embed=embed, view=view)
         return
 
-    # Desactivar restricción
-    if arg.lower() in ("off", "none", "sin", "0", "libre", "todos"):
-        REQUIRED_ROLE_ID = 0
-        _save_env("REQUIRED_ROLE_ID", "0")
-        embed = discord.Embed(
-            title="🔓  ROL REQUERIDO  ·  Desactivado",
-            description=(
-                "```ansi\n\u001b[1;34m◈ RESTRICCIÓN ELIMINADA\u001b[0m\n```"
-                "> El bot ahora está **abierto a todos** los miembros del servidor."
-            ),
-            color=CYBER_BLUE,
-        )
-        embed.set_footer(text=_cyber_footer())
-        await ctx.send(embed=embed)
-        return
-
-    # Resolver el rol: mención, ID numérico o nombre exacto
-    role: discord.Role | None = None
-    if ctx.message.role_mentions:
-        role = ctx.message.role_mentions[0]
-    else:
-        try:
-            role = ctx.guild.get_role(int(arg))
-        except ValueError:
-            role = discord.utils.get(ctx.guild.roles, name=arg)
-
-    if role is None:
-        await ctx.send(
-            embed=error_embed(
-                f"No se encontró ningún rol con `{arg}`.\n"
-                "▸ Usa @mención, ID numérico o nombre exacto del rol."
-            )
-        )
-        return
-
-    REQUIRED_ROLE_ID = role.id
-    _save_env("REQUIRED_ROLE_ID", str(role.id))
+    # Activar restricción al rol elegido
+    REQUIRED_ROLE_ID = rol.id
+    _save_env("REQUIRED_ROLE_ID", str(rol.id))
     embed = discord.Embed(
         title="🔐  ROL REQUERIDO  ·  Actualizado",
         description=(
             f"```ansi\n\u001b[1;35m◈ ACCESO RESTRINGIDO\u001b[0m\n```"
-            f"> 🎭 **Rol activo:** {role.mention}\n"
+            f"> 🎭 **Rol activo:** {rol.mention}\n"
             f"> Solo los miembros con ese rol pueden usar el bot.\n"
             f"> Los **Administradores** siempre tienen acceso completo."
         ),
         color=NEON_PURPLE,
     )
-    embed.set_footer(text=_cyber_footer(f"ID del rol: {role.id}"))
+    embed.set_footer(text=_cyber_footer(f"ID: {rol.id}"))
     await ctx.send(embed=embed)
 
 
@@ -1015,6 +1034,7 @@ async def cmd_help(ctx: commands.Context) -> None:
         ("🎥  `/video [segundos]`",  "Graba y envía un video *(máx. 30 seg)*"),
         ("💾  `/sd`",               "Explora y descarga archivos de la tarjeta SD"),
         ("📊  `/estado`",            "Estado del sistema: RAM, WiFi, uptime"),
+        ("🔐  `/rol [@rol]`",        "*(Admin)* Establece el rol que puede usar el bot"),
         ("❓  `/help`",              "Muestra esta ayuda"),
     ]
     for name, desc in cmds:

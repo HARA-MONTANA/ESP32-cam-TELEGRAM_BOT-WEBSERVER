@@ -731,7 +731,7 @@ def _get_prefix(bot_instance, message) -> str:
     return COMMAND_PREFIX
 
 
-bot = commands.Bot(command_prefix=_get_prefix, intents=intents, tree_cls=CyberTree)
+bot = commands.Bot(command_prefix=_get_prefix, intents=intents, tree_cls=CyberTree, help_command=None)
 
 
 @bot.check

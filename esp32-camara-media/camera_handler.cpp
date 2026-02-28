@@ -92,7 +92,20 @@ camera_fb_t* CameraHandler::capturePhoto(bool useFlash) {
     bool flashOn = useFlash && settings.flashEnabled;
     if (flashOn) {
         digitalWrite(FLASH_GPIO_NUM, HIGH);
-        delay(100);
+        delay(150);  // Esperar que el LED alcance su brillo máximo
+
+        // Descartar frames obsoletos del buffer capturados ANTES de encender el flash.
+        // El sensor OV2640 usa buffer doble: esp_camera_fb_get() puede devolver un
+        // frame antiguo (oscuro) que ya estaba en cola antes de que el flash encendiera.
+        // Además, el AEC (Auto Exposure Control) necesita 2-3 frames para recalibrarse
+        // con la nueva iluminación del flash.
+        for (int i = 0; i < 2; i++) {
+            camera_fb_t* dummy = esp_camera_fb_get();
+            if (dummy) {
+                esp_camera_fb_return(dummy);
+            }
+            delay(50);
+        }
     }
 
     camera_fb_t* fb = esp_camera_fb_get();
@@ -201,6 +214,16 @@ void CameraHandler::setFrameSize(framesize_t size) {
     if (s) {
         s->set_framesize(s, size);
         settings.frameSize = size;
+
+        // Descartar frames residuales tras el cambio de resolución.
+        // Al cambiar resolución el sensor reinicia su pipeline interno y los
+        // primeros frames pueden estar mal expuestos o ser de la resolución anterior.
+        for (int i = 0; i < 3; i++) {
+            camera_fb_t* dummy = esp_camera_fb_get();
+            if (dummy) {
+                esp_camera_fb_return(dummy);
+            }
+        }
     }
 }
 

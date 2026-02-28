@@ -4,12 +4,14 @@ Servidor multimedia para ESP32-CAM con dashboard web, streaming de video en vivo
 
 ## Funcionalidades
 
-- **Dashboard Web** - Interfaz visual con tema cyberpunk neon para controlar la camara desde el navegador
+- **Dashboard Web** - Interfaz visual con tema cyberpunk neon, reloj en formato 12h AM/PM y emojis en todos los controles
 - **Streaming MJPEG** - Video en vivo accesible desde cualquier navegador en la red local
-- **Bot de Telegram** - Control remoto completo: captura de fotos, configuracion, gestion de usuarios
-- **Bot de Discord** - Control remoto desde Discord: fotos, fotos con flash, foto diaria, grabacion de video y estado del sistema
+- **Bot de Telegram** - Control remoto completo: captura de fotos, configuracion, gestion de usuarios, mensajes con emojis
+- **Bot de Discord** - Respuestas con embeds cyberpunk, botones interactivos y paleta de colores neon (morado para fotos, azul para video)
 - **Grabacion de video** - El bot de Discord puede grabar clips MP4 directamente desde el stream MJPEG (hasta 30 segundos)
 - **Foto del dia** - Captura automatica programable con almacenamiento en SD y envio por Telegram o Discord
+- **Explorador de SD** - El bot de Discord permite navegar las carpetas de la SD y descargar archivos con un selector desplegable paginado
+- **Control de acceso por rol** - El bot de Discord puede restringirse a un rol especifico de Discord, configurable en tiempo real por el administrador
 - **Tarjeta SD** - Almacenamiento local de fotos con organizacion por fecha
 - **Configuracion por Serial** - Las credenciales (WiFi, token de Telegram, timezone) se configuran por puerto serial y se guardan en memoria NVS
 - **Control de camara** - Brillo, contraste, saturacion, efectos, balance de blancos, exposicion, ganancia, calidad JPEG, resolucion y flash LED
@@ -119,9 +121,12 @@ El primer usuario que escriba al bot se convierte automaticamente en **administr
 | Comando | Descripcion |
 |---------|-------------|
 | `/dormir` | Activar modo sleep manualmente |
+| `/dormir N` | Sleep y cambiar timeout de inactividad a N minutos |
 | `/despertar` | Salir del modo sleep |
 | `/sleepconfig` | Ver configuracion de sleep |
 | `/sleepconfig N` | Cambiar timeout de inactividad (minutos, 0 = desactivado) |
+| `/sleepconfig off` | Desactivar auto-sleep por inactividad |
+| `/sleepconfig poll N` | Cambiar intervalo de polling de Telegram en sleep (segundos) |
 
 ### Usuarios (solo admin)
 | Comando | Descripcion |
@@ -131,6 +136,20 @@ El primer usuario que escriba al bot se convierte automaticamente en **administr
 | `/add ID` | Agregar usuario autorizado |
 | `/remove ID` | Eliminar usuario |
 | `/admin ID` | Dar permisos de admin a un usuario |
+| `/acceso` | Ver estado del modo de autorización temporal |
+| `/acceso on` | Activar modo temporal (cualquier usuario que escriba queda autorizado) |
+| `/acceso off` | Desactivar modo temporal |
+| `/acceso N` | Activar modo temporal por N minutos y luego se desactiva solo |
+
+### Modo de autorización temporal
+
+El modo temporal permite que cualquier usuario que escriba al bot quede **autorizado automáticamente** sin que el admin tenga que usar `/add`:
+
+- Solo los administradores pueden activar o desactivar este modo.
+- Mientras está activo, el bot notifica al admin cada vez que un nuevo usuario se autoriza.
+- Con `/acceso N` el modo se desactiva solo al cumplirse el tiempo; el admin también puede cancelarlo antes con `/acceso off`.
+- El modo **no persiste entre reinicios** del ESP32-CAM: se desactiva automáticamente si el dispositivo se reinicia.
+- El primer usuario que alguna vez escriba al bot siempre queda autorizado como administrador, independientemente de este modo.
 
 ### Sistema
 | Comando | Descripcion |
@@ -150,12 +169,41 @@ Los comandos funcionan tanto como **slash commands** (`/foto`) como con el **pre
 
 | Comando | Descripcion |
 |---------|-------------|
-| `/foto` | Captura una imagen en vivo y la envia al canal |
+| `/foto` | Captura una imagen en vivo y la envia al canal con botones interactivos |
 | `/foto_flash` | Captura una imagen con el flash LED (GPIO4) encendido |
 | `/fotodiaria` | Envia la foto automatica del dia (la busca en la SD; si no hay, captura en vivo) |
 | `/video [segundos]` | Graba un clip MP4 del stream MJPEG y lo envia (1–30 segundos, default 10) |
 | `/estado` | Muestra RAM libre, PSRAM, senal WiFi, red, uptime e IP de la camara |
+| `/sd` | Abre el explorador de la tarjeta SD con selector de archivos paginado (20 por pagina) |
+| `/rol [@rol]` | Ver o establecer el rol requerido para usar el bot (solo administradores) |
 | `/help` | Muestra la lista de todos los comandos |
+
+### Botones interactivos
+
+Cada respuesta incluye botones para acciones rapidas sin escribir un nuevo comando:
+
+| Comando | Botones disponibles |
+|---------|---------------------|
+| `/foto` | 📸 Otra foto · ⚡ Con flash |
+| `/foto_flash` | ⚡ Repetir flash · 📸 Sin flash |
+| `/fotodiaria` | 🔄 Actualizar · 🎯 Captura en vivo |
+| `/video` | ⏱️ 5s · 10s · 20s · 30s |
+| `/estado` | 🔄 Actualizar estado |
+| `/sd` | ◀ Pagina anterior · ▶ Pagina siguiente |
+
+### Sistema de roles (control de acceso)
+
+El comando `/rol` permite al administrador restringir el uso del bot a un rol especifico de Discord:
+
+```
+/rol               → Ver el estado actual (sin restriccion o rol activo)
+/rol @NombreRol    → Solo los miembros con ese rol podran usar el bot
+/rol               → Con el boton "Desactivar" se elimina la restriccion
+```
+
+- Los **administradores del servidor** siempre tienen acceso, independientemente del rol configurado.
+- La restriccion afecta tanto a slash commands como a comandos de texto.
+- La configuracion se guarda en `.env` y persiste entre reinicios del bot.
 
 ### Requisitos previos
 
@@ -180,7 +228,7 @@ Los comandos funcionan tanto como **slash commands** (`/foto`) como con el **pre
 
 1. En el panel izquierdo ve a **OAuth2 > URL Generator**.
 2. En **Scopes** marca: `bot` y `applications.commands`.
-3. En **Bot Permissions** marca: `Send Messages`, `Attach Files`, `Embed Links`, `Read Message History`.
+3. En **Bot Permissions** marca: `Send Messages`, `Attach Files`, `Embed Links`, `Read Message History`, `Use Application Commands`.
 4. Copia la URL generada, pegala en el navegador e invita el bot a tu servidor.
 
 #### 3. Instalar dependencias Python
@@ -222,6 +270,10 @@ ESP32_PORT=80
 
 # Prefix para comandos de texto (los slash commands / siempre funcionan)
 COMMAND_PREFIX=w!
+
+# ID del rol requerido para usar el bot (0 = sin restriccion)
+# Cambialo en tiempo real con /rol @NombreRol desde Discord
+REQUIRED_ROLE_ID=0
 ```
 
 Alternativamente, puedes usar el **menu interactivo** para configurar sin editar el archivo:
@@ -251,7 +303,7 @@ Cuando el bot arranque veras en la terminal:
 ```
 HH:MM:SS [INFO] Bot conectado como ESP32-CAM#1234 (ID: xxxxxxxxxx)
 HH:MM:SS [INFO] ESP32-CAM → http://192.168.1.100:80
-HH:MM:SS [INFO] Sincronizados 6 comandos slash
+HH:MM:SS [INFO] Sincronizados 8 comandos slash
 ```
 
 Los slash commands pueden tardar hasta **1 hora** en aparecer globalmente en Discord tras la primera sincronizacion.
@@ -291,10 +343,13 @@ Accede desde el navegador a `http://<IP-del-ESP32>/` para:
 
 - Ver streaming en vivo (MJPEG)
 - Capturar fotos (se guardan en SD)
-- Ajustar parametros de la camara en tiempo real
+- Ajustar parametros de la camara en tiempo real (brillo, contraste, saturacion, resolucion, efectos, balance de blancos, flash, exposicion y ganancia automatica)
 - Ver galeria de fotos capturadas con visor integrado
 - Descargar y eliminar fotos
-- Monitorear estado del sistema (RAM, PSRAM, SD)
+- Monitorear estado del sistema (RAM, PSRAM, SD) con barra de uso visual
+- Gestionar redes WiFi guardadas desde la interfaz
+
+El dashboard incluye un **reloj en formato 12 horas AM/PM** en la cabecera y emojis en todos los controles para facilitar la lectura a simple vista.
 
 ## Endpoints HTTP
 

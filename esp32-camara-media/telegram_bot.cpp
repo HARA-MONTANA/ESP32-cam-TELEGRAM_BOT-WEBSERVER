@@ -44,16 +44,17 @@ static String formatPhotoCaption(int photoId, String photoPath, size_t photoSize
 
     // Agregar peso de la foto
     if (photoSize >= 1024) {
-        caption += "\nPeso: " + String(photoSize / 1024.0, 1) + " KB";
+        caption += "\n⚖️ Peso: " + String(photoSize / 1024.0, 1) + " KB";
     } else {
-        caption += "\nPeso: " + String(photoSize) + " bytes";
+        caption += "\n⚖️ Peso: " + String(photoSize) + " bytes";
     }
 
     return caption;
 }
 
 TelegramBot::TelegramBot()
-    : bot(nullptr), lastCheckTime(0), checkInterval(TELEGRAM_CHECK_INTERVAL), authorizedCount(0) {
+    : bot(nullptr), lastCheckTime(0), checkInterval(TELEGRAM_CHECK_INTERVAL), authorizedCount(0),
+      tempAuthMode(false), tempAuthExpiry(0) {
     // Valores por defecto
     dailyConfig.hour = DAILY_PHOTO_HOUR;
     dailyConfig.minute = DAILY_PHOTO_MINUTE;
@@ -92,12 +93,12 @@ void TelegramBot::init() {
 
     // Solo enviar mensaje de inicio si hay usuarios autorizados
     if (authorizedCount > 0) {
-        String initMsg = "ESP32-CAM iniciada!\n\n";
-        initMsg += "Foto diaria: " + String(dailyConfig.enabled ? "ACTIVA" : "INACTIVA") + "\n";
+        String initMsg = "📷 ESP32-CAM iniciada!\n\n";
+        initMsg += "📅 Foto diaria: " + String(dailyConfig.enabled ? "✅ ACTIVA" : "⛔ INACTIVA") + "\n";
         if (dailyConfig.enabled) {
-            initMsg += "Hora: " + String(dailyConfig.hour) + ":" +
+            initMsg += "🕐 Hora: " + String(dailyConfig.hour) + ":" +
                        (dailyConfig.minute < 10 ? "0" : "") + String(dailyConfig.minute);
-            initMsg += " (Flash: " + String(dailyConfig.useFlash ? "ON" : "OFF") + ")\n";
+            initMsg += " (⚡ Flash: " + String(dailyConfig.useFlash ? "ON" : "OFF") + ")\n";
         }
         initMsg += "\nUsa /start o /ayuda para ver comandos";
         sendMessage(initMsg);
@@ -115,6 +116,13 @@ void TelegramBot::reinitBot() {
 void TelegramBot::handleMessages() {
     // No intentar si WiFi no esta conectado
     if (WiFi.status() != WL_CONNECTED) return;
+
+    // Verificar expiración del modo de autorización temporal
+    if (tempAuthMode && tempAuthExpiry > 0 && millis() >= tempAuthExpiry) {
+        tempAuthMode = false;
+        tempAuthExpiry = 0;
+        sendMessage("⏰ Modo de autorización temporal expirado. Ya no se autorizan nuevos usuarios.");
+    }
 
     if (millis() - lastCheckTime > checkInterval) {
         int numNewMessages = bot->getUpdates(bot->last_message_received + 1);
@@ -144,9 +152,9 @@ void TelegramBot::processMessage(telegramMessage& msg) {
     if (authorizedCount == 0) {
         addAuthorizedId(chatId);
         Serial.println("Primer usuario autorizado como ADMIN: " + chatId);
-        String welcomeMsg = "Bienvenido! Eres el administrador.\n\n";
-        welcomeMsg += "Tu ID: " + chatId + "\n\n";
-        welcomeMsg += "Comandos de usuarios:\n";
+        String welcomeMsg = "👑 Bienvenido! Eres el administrador.\n\n";
+        welcomeMsg += "🆔 Tu ID: " + chatId + "\n\n";
+        welcomeMsg += "👥 Comandos de usuarios:\n";
         welcomeMsg += "/users - Ver lista\n";
         welcomeMsg += "/add ID - Agregar\n";
         welcomeMsg += "/remove ID - Eliminar\n\n";
@@ -155,9 +163,33 @@ void TelegramBot::processMessage(telegramMessage& msg) {
         return;
     }
 
+    // Modo de autorización temporal: cualquier nuevo usuario queda autorizado automáticamente
+    if (tempAuthMode && !isAuthorized(chatId)) {
+        if (addAuthorizedId(chatId)) {
+            Serial.println("Usuario autorizado en modo temporal: " + chatId + " (" + fromUser + ")");
+            String welcomeMsg = "✅ Acceso autorizado automáticamente (modo temporal activo).\n\n";
+            welcomeMsg += "🆔 Tu ID: " + chatId + "\n";
+            welcomeMsg += "Usa /ayuda para ver los comandos disponibles.";
+            bot->sendMessage(chatId, welcomeMsg, "");
+            // Notificar al primer admin
+            for (int i = 0; i < authorizedCount; i++) {
+                if (adminFlags[i] && authorizedIds[i] != chatId) {
+                    bot->sendMessage(authorizedIds[i],
+                        "👤 Nuevo usuario autorizado en modo temporal:\n" + fromUser + "\n🆔 ID: " + chatId +
+                        "\nTotal: " + String(authorizedCount) + " usuarios", "");
+                    break;
+                }
+            }
+        } else {
+            // Lista llena — no se puede autorizar
+            bot->sendMessage(chatId, "⚠️ Limite de usuarios alcanzado. Contacta al administrador.", "");
+            return;
+        }
+    }
+
     // Verificar que el usuario está autorizado
     if (!isAuthorized(chatId)) {
-        bot->sendMessage(chatId, "No tienes permiso para usar este bot.\nContacta al administrador.", "");
+        bot->sendMessage(chatId, "🔒 No tienes permiso para usar este bot.\nContacta al administrador.", "");
         Serial.println("Intento de acceso no autorizado desde: " + chatId + " (" + fromUser + ")");
         return;
     }
@@ -169,7 +201,7 @@ void TelegramBot::processMessage(telegramMessage& msg) {
     if (text.startsWith("/")) {
         handleCommand(text, chatId);
     } else {
-        bot->sendMessage(chatId, "Usa /ayuda para ver los comandos disponibles.", "");
+        bot->sendMessage(chatId, "ℹ️ Usa /ayuda para ver los comandos disponibles.", "");
     }
 }
 
@@ -206,7 +238,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
                         int total = sdCard.countAllPhotos();
                         bot->sendMessage(chatId, "Foto #" + String(photoId) + " no encontrada.\nHay " + String(total) + " fotos. Usa /carpeta para ver la lista.", "");
                     } else {
-                        bot->sendMessage(chatId, "Enviando foto #" + String(photoId) + "...", "");
+                        bot->sendMessage(chatId, "📤 Enviando foto #" + String(photoId) + "...", "");
                         size_t photoSize = 0;
                         uint8_t* photoData = sdCard.readPhoto(photoPath, photoSize);
                         if (photoData && photoSize > 0) {
@@ -220,7 +252,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
             }
         } else {
             // Sin argumentos: capturar foto actual
-            bot->sendMessage(chatId, "Capturando foto...", "");
+            bot->sendMessage(chatId, "📸 Capturando foto...", "");
 
             camera_fb_t* fb = camera.capturePhoto();
             if (fb) {
@@ -245,7 +277,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
                 }
 
                 // Construir caption con fecha/hora y peso
-                String caption = "Foto capturada";
+                String caption = "📷 Foto capturada";
                 struct tm captureTime;
                 if (getLocalTime(&captureTime)) {
                     char timeBuf[32];
@@ -254,9 +286,9 @@ void TelegramBot::handleCommand(String command, String chatId) {
                 }
                 // Mostrar peso de la foto
                 if (fb->len >= 1024) {
-                    caption += "\nPeso: " + String(fb->len / 1024.0, 1) + " KB";
+                    caption += "\n⚖️ Peso: " + String(fb->len / 1024.0, 1) + " KB";
                 } else {
-                    caption += "\nPeso: " + String(fb->len) + " bytes";
+                    caption += "\n⚖️ Peso: " + String(fb->len) + " bytes";
                 }
 
                 // Enviar por Telegram
@@ -284,14 +316,14 @@ void TelegramBot::handleCommand(String command, String chatId) {
             camera.saveSettings();
             dailyConfig.useFlash = true;
             saveDailyPhotoConfig();
-            String msg = "Flash: ACTIVADO\n(Aplica a fotos y foto diaria)";
+            String msg = "⚡ Flash: ACTIVADO\n(Aplica a fotos y foto diaria)";
             bot->sendMessage(chatId, msg, "");
         } else if (args == "off") {
             camera.setFlash(false);
             camera.saveSettings();
             dailyConfig.useFlash = false;
             saveDailyPhotoConfig();
-            String msg = "Flash: DESACTIVADO\n(Aplica a fotos y foto diaria)";
+            String msg = "🌑 Flash: DESACTIVADO\n(Aplica a fotos y foto diaria)";
             bot->sendMessage(chatId, msg, "");
         } else {
             CameraSettings currentSettings = camera.getSettings();
@@ -358,8 +390,8 @@ void TelegramBot::handleCommand(String command, String chatId) {
             // Activar envío automático
             dailyConfig.enabled = true;
             saveDailyPhotoConfig();
-            String msg = "Envio automatico de foto diaria: ACTIVADO\n";
-            msg += "Proxima foto a las " + String(dailyConfig.hour) + ":" +
+            String msg = "✅ Envio automatico de foto diaria: ACTIVADO\n";
+            msg += "🕐 Proxima foto a las " + String(dailyConfig.hour) + ":" +
                    (dailyConfig.minute < 10 ? "0" : "") + String(dailyConfig.minute);
             bot->sendMessage(chatId, msg, "");
         }
@@ -367,11 +399,11 @@ void TelegramBot::handleCommand(String command, String chatId) {
             // Desactivar envío automático
             dailyConfig.enabled = false;
             saveDailyPhotoConfig();
-            bot->sendMessage(chatId, "Envio automatico de foto diaria: DESACTIVADO\n(La foto se seguira guardando en SD)", "");
+            bot->sendMessage(chatId, "⛔ Envio automatico de foto diaria: DESACTIVADO\n💾 (La foto se seguira guardando en SD)", "");
         }
         else if (args == "") {
             // Sin argumentos: enviar la foto del día guardada en SD
-            bot->sendMessage(chatId, "Enviando foto del dia guardada...", "");
+            bot->sendMessage(chatId, "📤 Enviando foto del dia guardada...", "");
             sendSavedDailyPhoto();
         }
         else {
@@ -403,13 +435,13 @@ void TelegramBot::handleCommand(String command, String chatId) {
             if (list.isEmpty()) {
                 bot->sendMessage(chatId, "No hay fotos guardadas en la SD", "");
             } else {
-                String msg = "SD Card - Todas las fotos:\n\n";
+                String msg = "💾 SD Card - Todas las fotos:\n\n";
                 msg += list;
-                msg += "\nPag. " + String(page) + "/" + String(totalPages);
+                msg += "\n📄 Pag. " + String(page) + "/" + String(totalPages);
                 if (totalPages > 1) {
                     msg += "  /carpeta N = otra pagina";
                 }
-                msg += "\n\nEnviar foto: /enviar N";
+                msg += "\n\n📤 Enviar foto: /enviar N";
                 bot->sendMessage(chatId, msg, "");
             }
         }
@@ -436,7 +468,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
                     int total = sdCard.countAllPhotos();
                     bot->sendMessage(chatId, "Foto #" + String(photoIndex) + " no encontrada.\nHay " + String(total) + " fotos. Usa /carpeta para ver la lista.", "");
                 } else {
-                    bot->sendMessage(chatId, "Enviando foto #" + String(photoIndex) + "...", "");
+                    bot->sendMessage(chatId, "📤 Enviando foto #" + String(photoIndex) + "...", "");
                     size_t photoSize = 0;
                     uint8_t* photoData = sdCard.readPhoto(photoPath, photoSize);
                     if (photoData && photoSize > 0) {
@@ -451,15 +483,15 @@ void TelegramBot::handleCommand(String command, String chatId) {
     }
     else if (command == "/stream") {
         String ip = WiFi.localIP().toString();
-        String msg = "Accede al streaming en:\nhttp://" + ip + "/stream\n\nDashboard:\nhttp://" + ip + "/";
+        String msg = "🎥 Streaming en:\nhttp://" + ip + "/stream\n\n🌐 Dashboard:\nhttp://" + ip + "/";
         bot->sendMessage(chatId, msg, "");
     }
     else if (command == "/ip") {
         String ip = WiFi.localIP().toString();
-        bot->sendMessage(chatId, "IP: " + ip, "");
+        bot->sendMessage(chatId, "🌐 IP: " + ip, "");
     }
     else if (command == "/reiniciar" || command == "/restart" || command == "/reboot") {
-        bot->sendMessage(chatId, "Reiniciando ESP32-CAM...", "");
+        bot->sendMessage(chatId, "🔄 Reiniciando ESP32-CAM...", "");
         delay(1000);
         ESP.restart();
     }
@@ -481,7 +513,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
             } else if (addAuthorizedId(args)) {
                 bot->sendMessage(chatId, "Usuario " + args + " agregado.\nTotal: " + String(authorizedCount) + " usuarios", "");
                 // Notificar al nuevo usuario
-                bot->sendMessage(args, "Has sido autorizado para usar este bot.\nUsa /ayuda para ver los comandos.", "");
+                bot->sendMessage(args, "✅ Has sido autorizado para usar este bot.\nUsa /ayuda para ver los comandos.", "");
             } else {
                 bot->sendMessage(chatId, "No se pudo agregar. Maximo " + String(MAX_AUTHORIZED_IDS) + " usuarios.", "");
             }
@@ -528,7 +560,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
         } else {
             if (makeAdmin(args)) {
                 bot->sendMessage(chatId, "Usuario " + args + " ahora es administrador.\nAdmins: " + String(getAdminCount()) + "/" + String(MAX_ADMINS), "");
-                bot->sendMessage(args, "Ahora eres administrador del bot.\nPuedes usar /add, /remove y /admin.", "");
+                bot->sendMessage(args, "👑 Ahora eres administrador del bot.\nPuedes usar /add, /remove y /admin.", "");
             } else {
                 bot->sendMessage(chatId, "Error al hacer admin al usuario.", "");
             }
@@ -536,7 +568,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
     }
     else if (command == "/users" || command == "/ids") {
         String list = getAuthorizedIdsList();
-        String msg = "Usuarios (" + String(authorizedCount) + "/" + String(MAX_AUTHORIZED_IDS) + "):\n\n";
+        String msg = "👥 Usuarios (" + String(authorizedCount) + "/" + String(MAX_AUTHORIZED_IDS) + "):\n\n";
         msg += list;
         if (isAdmin(chatId)) {
             msg += "\n/add ID - Agregar\n/remove ID - Eliminar\n/admin ID - Hacer admin";
@@ -544,7 +576,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
         bot->sendMessage(chatId, msg, "");
     }
     else if (command == "/myid") {
-        bot->sendMessage(chatId, "Tu ID: " + chatId, "");
+        bot->sendMessage(chatId, "🆔 Tu ID: " + chatId, "");
     }
     // ----- MODO SLEEP -----
     else if (command == "/dormir" || command == "/sleep" ||
@@ -562,16 +594,16 @@ void TelegramBot::handleCommand(String command, String chatId) {
             sleepManager.setTimeout(mins == 0 ? 0 : (unsigned long)mins * 60000UL);
             sleepManager.saveTimeout();
         }
-        String msg = "Entrando en modo sleep.\n";
-        msg += "Consumo reducido. Poll Telegram cada " + String(sleepManager.getSleepPollInterval() / 1000UL) + " s.\n";
-        msg += "Escribe cualquier comando o conéctate al dashboard para activarme.";
+        String msg = "😴 Entrando en modo sleep.\n";
+        msg += "🔋 Consumo reducido. Poll Telegram cada " + String(sleepManager.getSleepPollInterval() / 1000UL) + " s.\n";
+        msg += "💬 Escribe cualquier comando o conéctate al dashboard para activarme.";
         bot->sendMessage(chatId, msg, "");
         sleepManager.enterSleep();
     }
     else if (command == "/despertar" || command == "/wake") {
         if (sleepManager.isSleeping()) {
             sleepManager.exitSleep();
-            bot->sendMessage(chatId, "Sistema activo!\n\n" + sleepManager.getStatus(), "");
+            bot->sendMessage(chatId, "⚡ Sistema activo!\n\n" + sleepManager.getStatus(), "");
         } else {
             bot->sendMessage(chatId, "Ya estoy activo.\n\n" + sleepManager.getStatus(), "");
         }
@@ -617,47 +649,107 @@ void TelegramBot::handleCommand(String command, String chatId) {
             }
         }
     }
+    // ----- MODO AUTORIZACIÓN TEMPORAL -----
+    else if (command == "/acceso" || command.startsWith("/acceso ")) {
+        if (!isAdmin(chatId)) {
+            bot->sendMessage(chatId, "🔒 Solo los administradores pueden usar este comando.", "");
+            return;
+        }
+
+        String args = "";
+        int spaceIndex = command.indexOf(' ');
+        if (spaceIndex > 0) {
+            args = command.substring(spaceIndex + 1);
+            args.trim();
+        }
+
+        if (args == "") {
+            // Mostrar estado actual
+            String msg = "🔓 Modo autorización temporal: ";
+            if (tempAuthMode) {
+                msg += "*ACTIVO*\n";
+                if (tempAuthExpiry > 0) {
+                    unsigned long remaining = (tempAuthExpiry - millis()) / 1000;
+                    msg += "⏱️ Expira en: " + String(remaining / 60) + " min " + String(remaining % 60) + " s\n";
+                } else {
+                    msg += "Sin límite de tiempo.\n";
+                }
+                msg += "Cualquier usuario que escriba quedará autorizado.\nUsa /acceso off para desactivar.";
+            } else {
+                msg += "*INACTIVO*\n";
+                msg += "Usa /acceso on para activar.";
+            }
+            bot->sendMessage(chatId, msg, "");
+        }
+        else if (args == "on") {
+            tempAuthMode = true;
+            tempAuthExpiry = 0;
+            bot->sendMessage(chatId, "🔓 Modo autorización temporal ACTIVADO.\nCualquier usuario que escriba al bot quedará autorizado automáticamente.\nUsa /acceso off para desactivar.", "");
+        }
+        else if (args == "off") {
+            tempAuthMode = false;
+            tempAuthExpiry = 0;
+            bot->sendMessage(chatId, "🔒 Modo autorización temporal DESACTIVADO.\nNo se autorizarán nuevos usuarios automáticamente.", "");
+        }
+        else {
+            // Intentar parsear como minutos
+            int mins = args.toInt();
+            if (mins >= 1 && mins <= 1440) {
+                tempAuthMode = true;
+                tempAuthExpiry = millis() + (unsigned long)mins * 60000UL;
+                String msg = "🔓 Modo autorización temporal ACTIVADO por " + String(mins) + " minuto";
+                if (mins != 1) msg += "s";
+                msg += ".\nSe desactivará automáticamente. Usa /acceso off para cancelar antes.";
+                bot->sendMessage(chatId, msg, "");
+            } else {
+                bot->sendMessage(chatId, "Uso:\n/acceso - Ver estado\n/acceso on - Activar (sin límite)\n/acceso off - Desactivar\n/acceso N - Activar por N minutos (1–1440)", "");
+            }
+        }
+    }
     else {
         bot->sendMessage(chatId, "Comando no reconocido. Usa /ayuda", "");
     }
 }
 
 void TelegramBot::sendHelpMessage(String chatId) {
-    String helpMsg = "Comandos disponibles:\n\n";
-    helpMsg += "FOTOS:\n";
+    String helpMsg = "📋 Comandos disponibles:\n\n";
+    helpMsg += "📸 FOTOS:\n";
     helpMsg += "/foto - Capturar y enviar foto\n";
     helpMsg += "/foto N - Enviar foto por numero\n";
     helpMsg += "/carpeta - Ver todas las fotos guardadas\n";
     helpMsg += "/enviar N - Enviar foto N de la lista\n\n";
 
-    helpMsg += "FLASH:\n";
+    helpMsg += "⚡ FLASH:\n";
     helpMsg += "/flash on - Activar flash\n";
     helpMsg += "/flash off - Desactivar flash\n";
     helpMsg += "(Aplica a fotos y foto diaria)\n\n";
 
-    helpMsg += "FOTO DIARIA:\n";
+    helpMsg += "📅 FOTO DIARIA:\n";
     helpMsg += "/fotodiaria - Enviar foto del dia guardada\n";
     helpMsg += "/fotodiaria on/off - Activar/desactivar envio\n";
     helpMsg += "/config - Ver configuracion actual\n";
     helpMsg += "/hora HH:MM - Cambiar hora\n\n";
 
-    helpMsg += "USUARIOS:\n";
+    helpMsg += "👥 USUARIOS:\n";
     helpMsg += "/users - Ver autorizados\n";
     helpMsg += "/myid - Ver tu ID\n";
     if (isAdmin(chatId)) {
         helpMsg += "/add ID - Agregar usuario\n";
         helpMsg += "/remove ID - Eliminar usuario\n";
         helpMsg += "/admin ID - Hacer administrador (max " + String(MAX_ADMINS) + ")\n";
+        helpMsg += "/acceso - Modo autorización temporal\n";
+        helpMsg += "/acceso on/off - Activar/desactivar\n";
+        helpMsg += "/acceso N - Activar por N minutos\n";
     }
     helpMsg += "\n";
 
-    helpMsg += "SISTEMA:\n";
+    helpMsg += "📊 SISTEMA:\n";
     helpMsg += "/estado - Ver estado del sistema\n";
     helpMsg += "/stream - Ver enlace de streaming\n";
     helpMsg += "/ip - Ver direccion IP\n";
     helpMsg += "/reiniciar - Reiniciar ESP32-CAM\n\n";
 
-    helpMsg += "AHORRO DE ENERGIA:\n";
+    helpMsg += "🔋 AHORRO DE ENERGIA:\n";
     helpMsg += "/dormir - Entrar en modo sleep\n";
     helpMsg += "/dormir N - Sleep y cambiar timeout a N min\n";
     helpMsg += "/despertar - Salir del modo sleep\n";
@@ -670,39 +762,39 @@ void TelegramBot::sendHelpMessage(String chatId) {
 }
 
 void TelegramBot::sendStatusMessage(String chatId) {
-    String status = "Estado del Sistema:\n\n";
+    String status = "📊 Estado del Sistema:\n\n";
 
     // Memoria
-    status += "RAM libre: " + String(ESP.getFreeHeap() / 1024) + " KB\n";
-    status += "PSRAM libre: " + String(ESP.getFreePsram() / 1024) + " KB\n";
+    status += "🔋 RAM libre: " + String(ESP.getFreeHeap() / 1024) + " KB\n";
+    status += "💾 PSRAM libre: " + String(ESP.getFreePsram() / 1024) + " KB\n";
 
     // WiFi
-    status += "WiFi RSSI: " + String(WiFi.RSSI()) + " dBm\n";
-    status += "IP: " + WiFi.localIP().toString() + "\n";
+    status += "📶 WiFi RSSI: " + String(WiFi.RSSI()) + " dBm\n";
+    status += "🌐 IP: " + WiFi.localIP().toString() + "\n";
 
     // SD Card
     if (sdCard.isInitialized()) {
         float sdFreeGB = sdCard.getFreeSpace() / (1024.0 * 1024.0 * 1024.0);
         float sdTotalGB = sdCard.getTotalSpace() / (1024.0 * 1024.0 * 1024.0);
-        status += "SD: " + String(sdFreeGB, 1) + "/" + String(sdTotalGB, 1) + " GB Libres\n";
-        status += "Carpeta: /" + sdCard.getPhotosFolder() + "\n";
+        status += "💿 SD: " + String(sdFreeGB, 1) + "/" + String(sdTotalGB, 1) + " GB Libres\n";
+        status += "📁 Carpeta: /" + sdCard.getPhotosFolder() + "\n";
     } else {
-        status += "SD: No disponible\n";
+        status += "💿 SD: No disponible\n";
     }
 
     // Configuración de cámara
     CameraSettings settings = camera.getSettings();
-    status += "\nConfiguracion de Camara:\n";
-    status += "Flash: " + String(settings.flashEnabled ? "ON" : "OFF") + "\n";
-    status += "Brillo: " + String(settings.brightness) + "\n";
-    status += "Contraste: " + String(settings.contrast) + "\n";
-    status += "Calidad: " + String(settings.quality) + "\n";
+    status += "\n📷 Configuracion de Camara:\n";
+    status += "⚡ Flash: " + String(settings.flashEnabled ? "ON" : "OFF") + "\n";
+    status += "☀️ Brillo: " + String(settings.brightness) + "\n";
+    status += "🌓 Contraste: " + String(settings.contrast) + "\n";
+    status += "🎞️ Calidad: " + String(settings.quality) + "\n";
 
     // Configuración de foto diaria
-    status += "\nFoto Diaria (a las " + String(dailyConfig.hour) + ":" +
+    status += "\n📅 Foto Diaria (a las " + String(dailyConfig.hour) + ":" +
               (dailyConfig.minute < 10 ? "0" : "") + String(dailyConfig.minute) + "):\n";
-    status += "Envio Telegram: " + String(dailyConfig.enabled ? "ON" : "OFF") + "\n";
-    status += "Guardar SD: SIEMPRE\n";
+    status += "📨 Envio Telegram: " + String(dailyConfig.enabled ? "ON" : "OFF") + "\n";
+    status += "💾 Guardar SD: SIEMPRE\n";
 
     // Modo sleep
     status += "\n" + sleepManager.getStatus();
@@ -711,21 +803,21 @@ void TelegramBot::sendStatusMessage(String chatId) {
 }
 
 void TelegramBot::sendDailyConfigMessage(String chatId) {
-    String msg = "Configuracion de Foto Diaria:\n\n";
-    msg += "Hora programada: " + String(dailyConfig.hour) + ":" +
+    String msg = "📅 Configuracion de Foto Diaria:\n\n";
+    msg += "🕐 Hora programada: " + String(dailyConfig.hour) + ":" +
            (dailyConfig.minute < 10 ? "0" : "") + String(dailyConfig.minute) + "\n";
-    msg += "Envio automatico: " + String(dailyConfig.enabled ? "ACTIVADO" : "DESACTIVADO") + "\n";
-    msg += "Guardar en SD: SIEMPRE\n";
-    msg += "Flash: " + String(dailyConfig.useFlash ? "ACTIVADO" : "DESACTIVADO") + "\n";
+    msg += "📨 Envio automatico: " + String(dailyConfig.enabled ? "✅ ACTIVADO" : "⛔ DESACTIVADO") + "\n";
+    msg += "💾 Guardar en SD: SIEMPRE\n";
+    msg += "⚡ Flash: " + String(dailyConfig.useFlash ? "✅ ACTIVADO" : "⛔ DESACTIVADO") + "\n";
 
     // Verificar si hay foto guardada hoy
     if (sdCard.isInitialized() && sdCard.photoExistsToday()) {
-        msg += "Foto de hoy: GUARDADA\n";
+        msg += "📸 Foto de hoy: ✅ GUARDADA\n";
     } else {
-        msg += "Foto de hoy: NO DISPONIBLE\n";
+        msg += "📸 Foto de hoy: ❌ NO DISPONIBLE\n";
     }
 
-    msg += "\nComandos:\n";
+    msg += "\n📋 Comandos:\n";
     msg += "/foto - Tomar foto ahora\n";
     msg += "/fotodiaria - Ver foto guardada\n";
     msg += "/fotodiaria on/off - Envio automatico\n";

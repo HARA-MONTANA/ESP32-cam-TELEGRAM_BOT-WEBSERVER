@@ -44,11 +44,11 @@ MAX_VIDEO_SECONDS: int = 30
 REQUEST_TIMEOUT: int = 10
 
 # ── Paleta Cyberpunk ─────────────────────────────────────────────────────────
-CYBER_GREEN  = 0x00FF9F  # #00ff9f — capturas normales
-CYBER_BLUE   = 0x00B8FF  # #00b8ff — estado / info
-DEEP_BLUE    = 0x001EFF  # #001eff — secundario / diaria
-CYBER_PURPLE = 0xBD00FF  # #bd00ff — video / primario
-NEON_PURPLE  = 0xD600FF  # #d600ff — help / acento
+CYBER_GREEN  = 0x00FF9F  # #00ff9f — reservado
+CYBER_BLUE   = 0x00B8FF  # #00b8ff — video / grabación / estado
+DEEP_BLUE    = 0x001EFF  # #001eff — secundario
+CYBER_PURPLE = 0xBD00FF  # #bd00ff — fotos (foto / fotodiaria)
+NEON_PURPLE  = 0xD600FF  # #d600ff — foto con flash / help / acento
 CYBER_RED    = 0xFF003C  # rojo neón — errores
 
 
@@ -143,11 +143,11 @@ def _cyber_footer(extra: str = "") -> str:
 def _foto_embed(filename: str, flash: bool) -> discord.Embed:
     icon  = "⚡" if flash else "📸"
     mode  = "Flash ⚡ **ON**" if flash else "Estándar 🌑"
-    color = CYBER_GREEN if not flash else 0xFFFF00
+    color = CYBER_PURPLE if not flash else NEON_PURPLE
     embed = discord.Embed(
         title=f"{icon}  CAPTURE  ·  ESP32-CAM",
         description=(
-            f"```ansi\n\u001b[1;36m◈ SISTEMA ONLINE\u001b[0m\n```"
+            f"```ansi\n\u001b[1;35m◈ SISTEMA ONLINE\u001b[0m\n```"
             f"> 🔦 **Modo:** {mode}\n"
             f"> 🕐 **Timestamp:** `{datetime.now().strftime('%Y-%m-%d  %H:%M:%S')}`"
         ),
@@ -164,11 +164,11 @@ def _fotodiaria_embed(today: str, filename: str, from_sd: bool) -> discord.Embed
     embed = discord.Embed(
         title=f"📅  DAILY SHOT  ·  {today}",
         description=(
-            f"```ansi\n\u001b[1;34m◈ FOTO DIARIA CARGADA\u001b[0m\n```"
+            f"```ansi\n\u001b[1;35m◈ FOTO DIARIA CARGADA\u001b[0m\n```"
             f"> {source_icon} **Fuente:** {source_text}\n"
             f"> 🕐 **Timestamp:** `{datetime.now().strftime('%Y-%m-%d  %H:%M:%S')}`"
         ),
-        color=DEEP_BLUE,
+        color=CYBER_PURPLE,
     )
     embed.set_image(url=f"attachment://{filename}")
     embed.set_footer(text=_cyber_footer())
@@ -181,12 +181,12 @@ def _video_embed(segundos: int, ts: str, file_size: int) -> discord.Embed:
     embed = discord.Embed(
         title=f"🎥  VIDEO REC  ·  {segundos}s",
         description=(
-            f"```ansi\n\u001b[1;35m◈ GRABACIÓN COMPLETADA\u001b[0m\n```"
+            f"```ansi\n\u001b[1;34m◈ GRABACIÓN COMPLETADA\u001b[0m\n```"
             f"> ⏱️ **Duración:** `{segundos}` segundos  `[{bar_str}]`\n"
             f"> 💿 **Tamaño:** `{file_size / 1024:.0f} KB`\n"
             f"> 🕐 **Timestamp:** `{datetime.now().strftime('%Y-%m-%d  %H:%M:%S')}`"
         ),
-        color=CYBER_PURPLE,
+        color=CYBER_BLUE,
     )
     embed.set_footer(text=_cyber_footer())
     return embed
@@ -391,10 +391,10 @@ class VideoView(discord.ui.View):
         msg = await interaction.followup.send(
             embed=discord.Embed(
                 description=(
-                    f"```ansi\n\u001b[1;35m⏺  GRABANDO...\u001b[0m\n```"
+                    f"```ansi\n\u001b[1;34m⏺  GRABANDO...\u001b[0m\n```"
                     f"> ⏱️ **Duración:** `{segundos}s`  `[{bar_str}]`"
                 ),
-                color=CYBER_PURPLE,
+                color=CYBER_BLUE,
             )
         )
         stream_url = esp32_url("/stream")
@@ -571,10 +571,10 @@ async def cmd_video(ctx: commands.Context, segundos: int = 10) -> None:
     aviso = await ctx.send(
         embed=discord.Embed(
             description=(
-                f"```ansi\n\u001b[1;35m⏺  GRABANDO...\u001b[0m\n```"
+                f"```ansi\n\u001b[1;34m⏺  GRABANDO...\u001b[0m\n```"
                 f"> ⏱️ **Duración:** `{segundos}s`  `[{bar_str}]`"
             ),
-            color=CYBER_PURPLE,
+            color=CYBER_BLUE,
         )
     )
 

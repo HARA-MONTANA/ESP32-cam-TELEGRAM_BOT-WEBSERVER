@@ -133,6 +133,29 @@ def get_daily_photo() -> tuple[bytes | None, str]:
     return capture_image(), fallback_name
 
 
+def list_sd_files() -> list | None:
+    """Devuelve la lista de archivos en la SD desde /photos."""
+    try:
+        r = requests.get(esp32_url("/photos"), timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else data.get("photos", [])
+    except Exception as exc:
+        log.error("Error listando archivos SD: %s", exc)
+        return None
+
+
+def get_sd_file(name: str) -> bytes | None:
+    """Descarga un archivo específico de la SD por nombre/ruta."""
+    try:
+        r = requests.get(esp32_url(f"/photo?name={name}"), timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        return r.content
+    except Exception as exc:
+        log.error("Error descargando archivo SD '%s': %s", name, exc)
+        return None
+
+
 # ── Builders de Embeds Cyberpunk ─────────────────────────────────────────────
 
 def _cyber_footer(extra: str = "") -> str:
@@ -242,6 +265,40 @@ def _estado_embed(status: dict) -> discord.Embed:
 
     embed.add_field(name="🔌 Dirección IP", value=f"`{ESP32_IP}`", inline=True)
     embed.set_footer(text=_cyber_footer("datos en tiempo real"))
+    return embed
+
+
+_SD_FILES_PER_PAGE = 20
+
+
+def _sd_embed(files: list, page: int, total_pages: int) -> discord.Embed:
+    start = page * _SD_FILES_PER_PAGE
+    page_files = files[start:start + _SD_FILES_PER_PAGE]
+    lines = []
+    for i, f in enumerate(page_files, start=start + 1):
+        name = f.get("name", "") if isinstance(f, dict) else str(f)
+        size = f.get("size", 0) if isinstance(f, dict) else 0
+        basename = name.rsplit("/", 1)[-1] or name
+        if basename.lower().endswith((".jpg", ".jpeg", ".png")):
+            icon = "🖼️"
+        elif basename.lower().endswith((".mp4", ".avi", ".mov")):
+            icon = "🎥"
+        else:
+            icon = "📄"
+        size_str = f"`{size / 1024:.1f} KB`" if size else "`? KB`"
+        lines.append(f"`{i:02d}.` {icon} `{basename}` — {size_str}")
+    desc = "\n".join(lines) if lines else "> *No hay archivos en la SD*"
+    count = len(files)
+    embed = discord.Embed(
+        title="💾  SD CARD BROWSER  ·  ESP32-CAM",
+        description=(
+            f"```ansi\n\u001b[1;35m◈ {count} ARCHIVO{'S' if count != 1 else ''} ENCONTRADO{'S' if count != 1 else ''}\u001b[0m\n```"
+            f"{desc}"
+        ),
+        color=CYBER_PURPLE,
+    )
+    footer_extra = f"Página {page + 1} / {total_pages}" if total_pages > 1 else ""
+    embed.set_footer(text=_cyber_footer(footer_extra) if footer_extra else _cyber_footer())
     return embed
 
 
@@ -465,6 +522,121 @@ class EstadoView(discord.ui.View):
         await interaction.followup.send(embed=_estado_embed(status), view=EstadoView())
 
 
+# ── SD Card Views ────────────────────────────────────────────────────────────
+
+class FileSelectMenu(discord.ui.Select):
+    """Menú desplegable con los archivos de la página actual de la SD."""
+
+    def __init__(self, files_page: list):
+        options = []
+        for f in files_page:
+            name = f.get("name", "") if isinstance(f, dict) else str(f)
+            size = f.get("size", 0) if isinstance(f, dict) else 0
+            basename = name.rsplit("/", 1)[-1] or name
+            if basename.lower().endswith((".jpg", ".jpeg", ".png")):
+                icon = "🖼️"
+            elif basename.lower().endswith((".mp4", ".avi", ".mov")):
+                icon = "🎥"
+            else:
+                icon = "📄"
+            label = basename[:100] or "archivo"
+            desc  = f"{size / 1024:.1f} KB" if size else None
+            options.append(discord.SelectOption(
+                label=label,
+                value=name[:100],
+                description=desc,
+                emoji=icon,
+            ))
+        super().__init__(
+            placeholder="📂 Selecciona un archivo para enviarlo...",
+            options=options,
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        name = self.values[0]
+        await interaction.response.defer()
+        loop = asyncio.get_running_loop()
+        data = await loop.run_in_executor(None, get_sd_file, name)
+        if data is None:
+            await interaction.followup.send(
+                embed=error_embed(f"No se pudo descargar `{name}` de la SD."),
+                ephemeral=True,
+            )
+            return
+        basename = name.rsplit("/", 1)[-1] or name
+        embed = discord.Embed(
+            title=f"💾  SD FILE  ·  {basename}",
+            description=(
+                f"```ansi\n\u001b[1;35m◈ ARCHIVO ENVIADO\u001b[0m\n```"
+                f"> 📂 **Ruta:** `{name}`\n"
+                f"> 💿 **Tamaño:** `{len(data) / 1024:.1f} KB`"
+            ),
+            color=CYBER_PURPLE,
+        )
+        if basename.lower().endswith((".jpg", ".jpeg", ".png")):
+            embed.set_image(url=f"attachment://{basename}")
+        embed.set_footer(text=_cyber_footer())
+        await interaction.followup.send(
+            embed=embed,
+            file=discord.File(io.BytesIO(data), filename=basename),
+        )
+
+
+class SDView(discord.ui.View):
+    """Vista paginada para explorar archivos de la SD."""
+
+    def __init__(self, files: list, page: int = 0):
+        super().__init__(timeout=180)
+        self.files = files
+        self.page  = page
+        self.total_pages = max(1, (len(files) + _SD_FILES_PER_PAGE - 1) // _SD_FILES_PER_PAGE)
+        self._rebuild()
+
+    def _page_slice(self) -> list:
+        start = self.page * _SD_FILES_PER_PAGE
+        return self.files[start:start + _SD_FILES_PER_PAGE]
+
+    def _rebuild(self):
+        self.clear_items()
+        page_files = self._page_slice()
+        if page_files:
+            self.add_item(FileSelectMenu(page_files))
+        if self.page > 0:
+            prev = discord.ui.Button(
+                label=f"◀  Pág. {self.page}",
+                style=discord.ButtonStyle.secondary,
+                row=1,
+            )
+            prev.callback = self._go_prev
+            self.add_item(prev)
+        if self.page < self.total_pages - 1:
+            nxt = discord.ui.Button(
+                label=f"Pág. {self.page + 2}  ▶",
+                style=discord.ButtonStyle.secondary,
+                row=1,
+            )
+            nxt.callback = self._go_next
+            self.add_item(nxt)
+
+    async def _go_prev(self, interaction: discord.Interaction):
+        self.page -= 1
+        self._rebuild()
+        await interaction.response.edit_message(
+            embed=_sd_embed(self.files, self.page, self.total_pages),
+            view=self,
+        )
+
+    async def _go_next(self, interaction: discord.Interaction):
+        self.page += 1
+        self._rebuild()
+        await interaction.response.edit_message(
+            embed=_sd_embed(self.files, self.page, self.total_pages),
+            view=self,
+        )
+
+
 # ── Instancia del bot ─────────────────────────────────────────────────────────
 
 intents = discord.Intents.default()
@@ -634,6 +806,31 @@ async def cmd_estado(ctx: commands.Context) -> None:
     await ctx.send(embed=_estado_embed(status), view=EstadoView())
 
 
+# ── /sd ──────────────────────────────────────────────────────────────────────
+
+@bot.hybrid_command(name="sd", description="💾 Explora y descarga archivos guardados en la tarjeta SD")
+async def cmd_sd(ctx: commands.Context) -> None:
+    await ctx.defer()
+    files = list_sd_files()
+    if files is None:
+        await ctx.send(embed=connection_error_embed())
+        return
+    if not files:
+        empty = discord.Embed(
+            title="💾  SD CARD  ·  Vacía",
+            description=(
+                "```ansi\n\u001b[1;33m◈ SIN ARCHIVOS\u001b[0m\n```"
+                "> No hay archivos guardados en la tarjeta SD."
+            ),
+            color=CYBER_PURPLE,
+        )
+        empty.set_footer(text=_cyber_footer())
+        await ctx.send(embed=empty)
+        return
+    total_pages = max(1, (len(files) + _SD_FILES_PER_PAGE - 1) // _SD_FILES_PER_PAGE)
+    await ctx.send(embed=_sd_embed(files, 0, total_pages), view=SDView(files))
+
+
 # ── /help ─────────────────────────────────────────────────────────────────────
 
 @bot.hybrid_command(name="help", description="❓ Muestra todos los comandos del bot")
@@ -658,6 +855,7 @@ async def cmd_help(ctx: commands.Context) -> None:
         ("⚡  `/foto_flash`",        "Captura con el flash LED encendido"),
         ("📅  `/fotodiaria`",        "Foto automática del día *(SD o captura en vivo)*"),
         ("🎥  `/video [segundos]`",  "Graba y envía un video *(máx. 30 seg)*"),
+        ("💾  `/sd`",               "Explora y descarga archivos de la tarjeta SD"),
         ("📊  `/estado`",            "Estado del sistema: RAM, WiFi, uptime"),
         ("❓  `/help`",              "Muestra esta ayuda"),
     ]

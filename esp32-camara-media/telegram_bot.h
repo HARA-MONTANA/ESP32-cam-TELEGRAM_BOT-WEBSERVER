@@ -65,6 +65,10 @@ private:
     int authorizedCount;
     bool adminFlags[MAX_AUTHORIZED_IDS];  // true = es admin
 
+    // Modo de autorización temporal
+    bool tempAuthMode;
+    unsigned long tempAuthExpiry;  // millis() de expiración; 0 = sin límite de tiempo
+
     void processMessage(telegramMessage& msg);
     void handleCommand(String command, String chatId);
     void sendHelpMessage(String chatId);

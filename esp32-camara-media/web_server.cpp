@@ -956,7 +956,7 @@ String CameraWebServer::generateDashboardHTML() {
     <div class="container">
         <div class="site-header">
             <div class="header-title">&#128247; ESP32-CAM Dashboard</div>
-            <div class="header-clock" id="headerClock">00:00:00</div>
+            <div class="header-clock" id="headerClock">&#128336; --:--:-- --</div>
             <div class="header-bot">
                 <div id="botLinkDisplay" style="display:none;align-items:center;gap:8px;">
                     <a id="botLink" href="#" target="_blank" rel="noopener" class="bot-link">
@@ -973,23 +973,23 @@ String CameraWebServer::generateDashboardHTML() {
 
         <div class="grid">
             <div class="card">
-                <h2>Vista en Vivo</h2>
+                <h2>&#128249; Vista en Vivo</h2>
                 <div class="stream-container">
                     <img id="stream" src="/capture" alt="Stream">
                 </div>
                 <div class="btn-group">
                     <button class="btn btn-primary" onclick="toggleStream()">
-                        <span id="streamBtn">Iniciar Stream</span>
+                        <span id="streamBtn">&#9654; Iniciar Stream</span>
                     </button>
-                    <button class="btn btn-success" onclick="capturePhoto()">Capturar Foto</button>
+                    <button class="btn btn-success" onclick="capturePhoto()">&#128248; Capturar Foto</button>
                 </div>
             </div>
 
             <div class="card">
-                <h2>Ajustes de Imagen</h2>
+                <h2>&#9881; Ajustes de Imagen</h2>
 
                 <div class="control-group">
-                    <label>Brillo</label>
+                    <label>&#9728; Brillo</label>
                     <div class="slider-container">
                         <input type="range" id="brightness" min="-2" max="2" value="0" onchange="updateSetting('brightness', this.value)">
                         <span class="slider-value" id="brightnessVal">0</span>
@@ -997,7 +997,7 @@ String CameraWebServer::generateDashboardHTML() {
                 </div>
 
                 <div class="control-group">
-                    <label>Contraste</label>
+                    <label>&#127763; Contraste</label>
                     <div class="slider-container">
                         <input type="range" id="contrast" min="-2" max="2" value="0" onchange="updateSetting('contrast', this.value)">
                         <span class="slider-value" id="contrastVal">0</span>
@@ -1005,7 +1005,7 @@ String CameraWebServer::generateDashboardHTML() {
                 </div>
 
                 <div class="control-group">
-                    <label>Saturacion</label>
+                    <label>&#128167; Saturacion</label>
                     <div class="slider-container">
                         <input type="range" id="saturation" min="-2" max="2" value="0" onchange="updateSetting('saturation', this.value)">
                         <span class="slider-value" id="saturationVal">0</span>
@@ -1013,7 +1013,7 @@ String CameraWebServer::generateDashboardHTML() {
                 </div>
 
                 <div class="control-group">
-                    <label>Calidad JPEG (menor = mejor)</label>
+                    <label>&#128247; Calidad JPEG (menor = mejor)</label>
                     <div class="slider-container">
                         <input type="range" id="quality" min="10" max="63" value="12" onchange="updateSetting('quality', this.value)">
                         <span class="slider-value" id="qualityVal">12</span>
@@ -1021,7 +1021,7 @@ String CameraWebServer::generateDashboardHTML() {
                 </div>
 
                 <div class="control-group">
-                    <label>Resolucion</label>
+                    <label>&#128208; Resolucion</label>
                     <select id="frameSize" onchange="updateSetting('frameSize', parseInt(this.value))">
                         <option value="0">96x96</option>
                         <option value="1">160x120</option>
@@ -1042,10 +1042,10 @@ String CameraWebServer::generateDashboardHTML() {
             </div>
 
             <div class="card">
-                <h2>Efectos y Balance</h2>
+                <h2>&#127912; Efectos y Balance</h2>
 
                 <div class="control-group">
-                    <label>Efecto Especial</label>
+                    <label>&#10024; Efecto Especial</label>
                     <select id="specialEffect" onchange="updateSetting('specialEffect', parseInt(this.value))">
                         <option value="0">Sin Efecto</option>
                         <option value="1">Negativo</option>
@@ -1058,7 +1058,7 @@ String CameraWebServer::generateDashboardHTML() {
                 </div>
 
                 <div class="control-group">
-                    <label>Balance de Blancos</label>
+                    <label>&#127777; Balance de Blancos</label>
                     <select id="whiteBalance" onchange="updateSetting('whiteBalance', parseInt(this.value))">
                         <option value="0">Automatico</option>
                         <option value="1">Soleado</option>
@@ -1069,7 +1069,7 @@ String CameraWebServer::generateDashboardHTML() {
                 </div>
 
                 <div class="switch-container">
-                    <label>Flash LED</label>
+                    <label>&#9889; Flash LED</label>
                     <label class="switch">
                         <input type="checkbox" id="flash" onchange="updateSetting('flash', this.checked)">
                         <span class="slider-toggle"></span>
@@ -1077,7 +1077,7 @@ String CameraWebServer::generateDashboardHTML() {
                 </div>
 
                 <div class="switch-container">
-                    <label>Exposicion Automatica</label>
+                    <label>&#127749; Exposicion Automatica</label>
                     <label class="switch">
                         <input type="checkbox" id="exposureCtrl" checked onchange="updateSetting('exposureCtrl', this.checked)">
                         <span class="slider-toggle"></span>
@@ -1085,7 +1085,7 @@ String CameraWebServer::generateDashboardHTML() {
                 </div>
 
                 <div class="switch-container">
-                    <label>Ganancia Automatica</label>
+                    <label>&#128262; Ganancia Automatica</label>
                     <label class="switch">
                         <input type="checkbox" id="gainCtrl" checked onchange="updateSetting('gainCtrl', this.checked)">
                         <span class="slider-toggle"></span>
@@ -1093,36 +1093,36 @@ String CameraWebServer::generateDashboardHTML() {
                 </div>
 
                 <div class="btn-group" style="margin-top: 20px;">
-                    <button class="btn btn-warning" onclick="saveSettings()">Guardar Configuracion</button>
+                    <button class="btn btn-warning" onclick="saveSettings()">&#128190; Guardar Configuracion</button>
                 </div>
             </div>
 
             <div class="card">
-                <h2>Estado del Sistema</h2>
+                <h2>&#128202; Estado del Sistema</h2>
                 <div class="status-bar">
                     <div class="status-item">
                         <div class="value" id="heapValue">--</div>
-                        <div class="label">Heap Libre (KB)</div>
+                        <div class="label">&#128267; Heap Libre (KB)</div>
                     </div>
                     <div class="status-item">
                         <div class="value" id="psramValue">--</div>
-                        <div class="label">PSRAM Libre (KB)</div>
+                        <div class="label">&#128190; PSRAM Libre (KB)</div>
                     </div>
                     <div class="status-item">
                         <div class="value" id="sdValue">--</div>
-                        <div class="label">SD Card</div>
+                        <div class="label">&#128191; SD Card</div>
                         <div class="sd-bar-container" id="sdBarContainer" style="display:none;">
                             <div class="sd-bar-fill" id="sdBarFill"></div>
                         </div>
                     </div>
                 </div>
                 <div class="btn-group" style="margin-top: 20px;">
-                    <button class="btn btn-primary" onclick="loadStatus()">Actualizar Estado</button>
+                    <button class="btn btn-primary" onclick="loadStatus()">&#128260; Actualizar Estado</button>
                 </div>
             </div>
 
             <div class="card" style="grid-column: 1 / -1;">
-                <h2>Galeria de Fotos</h2>
+                <h2>&#128247; Galeria de Fotos</h2>
                 <div id="folderTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;">
                     <p style="color:#888;font-size:0.85em;">Cargando carpetas...</p>
                 </div>
@@ -1138,7 +1138,7 @@ String CameraWebServer::generateDashboardHTML() {
                         <button class="viewer-nav" id="nextBtn" onclick="nextPhoto()">Siguiente &#9654;</button>
                     </div>
                     <div class="viewer-bar" style="border-top:none;justify-content:center;gap:8px;padding-top:0;">
-                        <button onclick="downloadPhoto(photoList[currentPhotoIndex].name)" style="padding:6px 14px;background:linear-gradient(135deg,#e0ff00,#aacc00);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:0.8em;font-weight:600;">Descargar</button>
+                        <button onclick="downloadPhoto(photoList[currentPhotoIndex].name)" style="padding:6px 14px;background:linear-gradient(135deg,#e0ff00,#aacc00);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:0.8em;font-weight:600;">&#128229; Descargar</button>
                         <button onclick="window.open('/photo?folder='+encodeURIComponent(currentFolder)+'&name='+encodeURIComponent(photoList[currentPhotoIndex].name),'_blank')" style="padding:6px 14px;background:linear-gradient(135deg,#00f0ff,#0099aa);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:0.8em;font-weight:600;">Abrir en Pestana</button>
                         <button class="viewer-close" onclick="closeViewer()">Cerrar</button>
                     </div>
@@ -1147,7 +1147,7 @@ String CameraWebServer::generateDashboardHTML() {
                     <p style="color: #888; text-align: center;">Cargando...</p>
                 </div>
                 <div class="btn-group" style="margin-top: 15px;">
-                    <button class="btn btn-success" onclick="loadPhotos()">Actualizar Lista</button>
+                    <button class="btn btn-success" onclick="loadPhotos()">&#128260; Actualizar Lista</button>
                 </div>
             </div>
 
@@ -1175,7 +1175,7 @@ String CameraWebServer::generateDashboardHTML() {
                             <button onclick="togglePass('newPass', this)" title="Mostrar/ocultar"
                                     style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:#555;cursor:pointer;font-size:1em;padding:2px 4px;">&#128065;</button>
                         </div>
-                        <button class="btn btn-success" onclick="addWifiNetwork()" style="flex:none;min-width:120px;">Guardar Red</button>
+                        <button class="btn btn-success" onclick="addWifiNetwork()" style="flex:none;min-width:120px;">&#9989; Guardar Red</button>
                     </div>
                 </div>
             </div>
@@ -1205,7 +1205,7 @@ String CameraWebServer::generateDashboardHTML() {
 
             if (streaming) {
                 img.src = '/stream?' + Date.now();
-                btn.textContent = 'Detener Stream';
+                btn.innerHTML = '&#9209; Detener Stream';
             } else {
                 img.src = '';
                 const parent = img.parentNode;
@@ -1213,7 +1213,7 @@ String CameraWebServer::generateDashboardHTML() {
                 newImg.id = 'stream';
                 newImg.alt = 'Stream';
                 parent.replaceChild(newImg, img);
-                btn.textContent = 'Iniciar Stream';
+                btn.innerHTML = '&#9654; Iniciar Stream';
                 setTimeout(() => {
                     const currentImg = document.getElementById('stream');
                     if (currentImg && !streaming) {
@@ -1263,7 +1263,7 @@ String CameraWebServer::generateDashboardHTML() {
                 newImg.id = 'stream';
                 newImg.alt = 'Stream';
                 parent.replaceChild(newImg, img);
-                btn.textContent = 'Iniciar Stream';
+                btn.innerHTML = '&#9654; Iniciar Stream';
                 setTimeout(doCapture, 500);
             } else {
                 doCapture();
@@ -1294,12 +1294,12 @@ String CameraWebServer::generateDashboardHTML() {
                     });
                 } catch (error) {
                     showToast('Error al actualizar');
-                    btn.textContent = 'Iniciar Stream';
+                    btn.innerHTML = '&#9654; Iniciar Stream';
                     return;
                 }
 
                 streaming = true;
-                btn.textContent = 'Detener Stream';
+                btn.innerHTML = '&#9209; Detener Stream';
                 document.getElementById('stream').src = '/stream?' + Date.now();
                 return;
             }
@@ -1462,7 +1462,7 @@ String CameraWebServer::generateDashboardHTML() {
                     html += '</div>';
                     html += '<div style="display:flex;gap:5px;flex-shrink:0;margin-left:10px;">';
                     html += '<button onclick="viewPhoto(\'' + photo.name + '\')" style="padding:5px 10px;background:linear-gradient(135deg,#00f0ff,#0099aa);color:#000;border:none;border-radius:5px;cursor:pointer;font-size:0.8em;font-weight:600;">Ver</button>';
-                    html += '<button onclick="downloadPhoto(\'' + photo.name + '\')" style="padding:5px 10px;background:linear-gradient(135deg,#e0ff00,#aacc00);color:#000;border:none;border-radius:5px;cursor:pointer;font-size:0.8em;font-weight:600;">Descargar</button>';
+                    html += '<button onclick="downloadPhoto(\'' + photo.name + '\')" style="padding:5px 10px;background:linear-gradient(135deg,#e0ff00,#aacc00);color:#000;border:none;border-radius:5px;cursor:pointer;font-size:0.8em;font-weight:600;">&#128229; Descargar</button>';
                     html += '<button onclick="deletePhoto(\'' + photo.name + '\')" style="padding:5px 10px;background:linear-gradient(135deg,#ff0055,#aa0033);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:0.8em;font-weight:600;">Eliminar</button>';
                     html += '</div></div>';
                 });
@@ -1539,13 +1539,16 @@ String CameraWebServer::generateDashboardHTML() {
             }
         }
 
-        // === Reloj en tiempo real ===
+        // === Reloj en tiempo real (formato 12 h) ===
         function updateClock() {
             const now = new Date();
-            const h = String(now.getHours()).padStart(2, '0');
+            let h = now.getHours();
+            const ampm = h >= 12 ? 'PM' : 'AM';
+            h = h % 12 || 12;
             const m = String(now.getMinutes()).padStart(2, '0');
             const s = String(now.getSeconds()).padStart(2, '0');
-            document.getElementById('headerClock').textContent = h + ':' + m + ':' + s;
+            document.getElementById('headerClock').innerHTML =
+                '&#128336;&nbsp;' + String(h).padStart(2, '0') + ':' + m + ':' + s + '&nbsp;<span style="font-size:0.7em;letter-spacing:1px;">' + ampm + '</span>';
         }
         setInterval(updateClock, 1000);
         updateClock();

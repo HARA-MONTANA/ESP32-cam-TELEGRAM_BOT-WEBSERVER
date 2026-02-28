@@ -650,7 +650,7 @@ void TelegramBot::handleCommand(String command, String chatId) {
         }
     }
     // ----- MODO AUTORIZACIÓN TEMPORAL -----
-    else if (command == "/modotemp" || command.startsWith("/modotemp ")) {
+    else if (command == "/acceso" || command.startsWith("/acceso ")) {
         if (!isAdmin(chatId)) {
             bot->sendMessage(chatId, "🔒 Solo los administradores pueden usar este comando.", "");
             return;
@@ -674,17 +674,17 @@ void TelegramBot::handleCommand(String command, String chatId) {
                 } else {
                     msg += "Sin límite de tiempo.\n";
                 }
-                msg += "Cualquier usuario que escriba quedará autorizado.\nUsa /modotemp off para desactivar.";
+                msg += "Cualquier usuario que escriba quedará autorizado.\nUsa /acceso off para desactivar.";
             } else {
                 msg += "*INACTIVO*\n";
-                msg += "Usa /modotemp on para activar.";
+                msg += "Usa /acceso on para activar.";
             }
             bot->sendMessage(chatId, msg, "");
         }
         else if (args == "on") {
             tempAuthMode = true;
             tempAuthExpiry = 0;
-            bot->sendMessage(chatId, "🔓 Modo autorización temporal ACTIVADO.\nCualquier usuario que escriba al bot quedará autorizado automáticamente.\nUsa /modotemp off para desactivar.", "");
+            bot->sendMessage(chatId, "🔓 Modo autorización temporal ACTIVADO.\nCualquier usuario que escriba al bot quedará autorizado automáticamente.\nUsa /acceso off para desactivar.", "");
         }
         else if (args == "off") {
             tempAuthMode = false;
@@ -699,10 +699,10 @@ void TelegramBot::handleCommand(String command, String chatId) {
                 tempAuthExpiry = millis() + (unsigned long)mins * 60000UL;
                 String msg = "🔓 Modo autorización temporal ACTIVADO por " + String(mins) + " minuto";
                 if (mins != 1) msg += "s";
-                msg += ".\nSe desactivará automáticamente. Usa /modotemp off para cancelar antes.";
+                msg += ".\nSe desactivará automáticamente. Usa /acceso off para cancelar antes.";
                 bot->sendMessage(chatId, msg, "");
             } else {
-                bot->sendMessage(chatId, "Uso:\n/modotemp - Ver estado\n/modotemp on - Activar (sin límite)\n/modotemp off - Desactivar\n/modotemp N - Activar por N minutos (1–1440)", "");
+                bot->sendMessage(chatId, "Uso:\n/acceso - Ver estado\n/acceso on - Activar (sin límite)\n/acceso off - Desactivar\n/acceso N - Activar por N minutos (1–1440)", "");
             }
         }
     }
@@ -737,9 +737,9 @@ void TelegramBot::sendHelpMessage(String chatId) {
         helpMsg += "/add ID - Agregar usuario\n";
         helpMsg += "/remove ID - Eliminar usuario\n";
         helpMsg += "/admin ID - Hacer administrador (max " + String(MAX_ADMINS) + ")\n";
-        helpMsg += "/modotemp - Modo autorización temporal\n";
-        helpMsg += "/modotemp on/off - Activar/desactivar\n";
-        helpMsg += "/modotemp N - Activar por N minutos\n";
+        helpMsg += "/acceso - Modo autorización temporal\n";
+        helpMsg += "/acceso on/off - Activar/desactivar\n";
+        helpMsg += "/acceso N - Activar por N minutos\n";
     }
     helpMsg += "\n";
 

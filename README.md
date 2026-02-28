@@ -136,10 +136,10 @@ El primer usuario que escriba al bot se convierte automaticamente en **administr
 | `/add ID` | Agregar usuario autorizado |
 | `/remove ID` | Eliminar usuario |
 | `/admin ID` | Dar permisos de admin a un usuario |
-| `/modotemp` | Ver estado del modo de autorización temporal |
-| `/modotemp on` | Activar modo temporal (cualquier usuario que escriba queda autorizado) |
-| `/modotemp off` | Desactivar modo temporal |
-| `/modotemp N` | Activar modo temporal por N minutos y luego se desactiva solo |
+| `/acceso` | Ver estado del modo de autorización temporal |
+| `/acceso on` | Activar modo temporal (cualquier usuario que escriba queda autorizado) |
+| `/acceso off` | Desactivar modo temporal |
+| `/acceso N` | Activar modo temporal por N minutos y luego se desactiva solo |
 
 ### Modo de autorización temporal
 
@@ -147,7 +147,7 @@ El modo temporal permite que cualquier usuario que escriba al bot quede **autori
 
 - Solo los administradores pueden activar o desactivar este modo.
 - Mientras está activo, el bot notifica al admin cada vez que un nuevo usuario se autoriza.
-- Con `/modotemp N` el modo se desactiva solo al cumplirse el tiempo; el admin también puede cancelarlo antes con `/modotemp off`.
+- Con `/acceso N` el modo se desactiva solo al cumplirse el tiempo; el admin también puede cancelarlo antes con `/acceso off`.
 - El modo **no persiste entre reinicios** del ESP32-CAM: se desactiva automáticamente si el dispositivo se reinicia.
 - El primer usuario que alguna vez escriba al bot siempre queda autorizado como administrador, independientemente de este modo.
 

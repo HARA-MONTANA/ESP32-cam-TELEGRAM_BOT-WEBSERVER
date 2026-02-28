@@ -28,7 +28,8 @@ import discord
 import requests
 from discord import app_commands
 from discord.ext import commands
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
+from pathlib import Path
 
 from recorder import record_stream
 
@@ -42,6 +43,7 @@ COMMAND_PREFIX: str = "w!"
 
 MAX_VIDEO_SECONDS: int = 30
 REQUEST_TIMEOUT: int = 10
+REQUIRED_ROLE_ID: int = 0  # 0 = sin restricción, cualquiera puede usar el bot
 
 # ── Paleta Cyberpunk ─────────────────────────────────────────────────────────
 CYBER_GREEN  = 0x00FF9F  # #00ff9f — reservado
@@ -54,14 +56,23 @@ CYBER_RED    = 0xFF003C  # rojo neón — errores
 
 # ── Configuración ────────────────────────────────────────────────────────────
 
+_ENV_PATH = Path(__file__).parent / ".env"
+
+
+def _save_env(key: str, value: str) -> None:
+    """Persiste un par clave=valor en el archivo .env."""
+    set_key(str(_ENV_PATH), key, value)
+
+
 def _load_config() -> None:
     """Carga (o recarga) las variables de entorno desde el .env."""
-    global DISCORD_TOKEN, ESP32_IP, ESP32_PORT, COMMAND_PREFIX
+    global DISCORD_TOKEN, ESP32_IP, ESP32_PORT, COMMAND_PREFIX, REQUIRED_ROLE_ID
     load_dotenv(override=True)
-    DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
-    ESP32_IP      = os.getenv("ESP32_IP", "192.168.1.100")
-    ESP32_PORT    = os.getenv("ESP32_PORT", "80")
-    COMMAND_PREFIX = os.getenv("COMMAND_PREFIX", "w!")
+    DISCORD_TOKEN    = os.getenv("DISCORD_TOKEN", "")
+    ESP32_IP         = os.getenv("ESP32_IP", "192.168.1.100")
+    ESP32_PORT       = os.getenv("ESP32_PORT", "80")
+    COMMAND_PREFIX   = os.getenv("COMMAND_PREFIX", "w!")
+    REQUIRED_ROLE_ID = int(os.getenv("REQUIRED_ROLE_ID", "0"))
 
 
 # ── Helpers HTTP → ESP32-CAM ─────────────────────────────────────────────────
@@ -320,6 +331,44 @@ def connection_error_embed() -> discord.Embed:
         "▸ Verifica que la cámara esté encendida\n"
         "▸ Confirma que esté en la misma red WiFi"
     )
+
+
+def role_denied_embed() -> discord.Embed:
+    role_mention = f"<@&{REQUIRED_ROLE_ID}>" if REQUIRED_ROLE_ID else "rol requerido"
+    embed = discord.Embed(
+        title="🔒  ACCESO DENEGADO",
+        description=(
+            "```ansi\n\u001b[1;31m◈ PERMISOS INSUFICIENTES\u001b[0m\n```"
+            f"> No tienes el rol necesario para usar este bot.\n"
+            f"> 🎭 **Rol requerido:** {role_mention}"
+        ),
+        color=CYBER_RED,
+    )
+    embed.set_footer(text=_cyber_footer())
+    return embed
+
+
+# ── Árbol slash con verificación de rol ──────────────────────────────────────
+
+class CyberTree(app_commands.CommandTree):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if REQUIRED_ROLE_ID == 0:
+            return True
+        member = interaction.user
+        if isinstance(member, discord.Member) and member.guild_permissions.administrator:
+            return True
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                embed=role_denied_embed(), ephemeral=True
+            )
+            return False
+        role = interaction.guild.get_role(REQUIRED_ROLE_ID)
+        if role is None or role in member.roles:
+            return True
+        await interaction.response.send_message(
+            embed=role_denied_embed(), ephemeral=True
+        )
+        return False
 
 
 # ── Vistas con botones ────────────────────────────────────────────────────────
@@ -647,7 +696,31 @@ def _get_prefix(bot_instance, message) -> str:
     return COMMAND_PREFIX
 
 
-bot = commands.Bot(command_prefix=_get_prefix, intents=intents)
+bot = commands.Bot(command_prefix=_get_prefix, intents=intents, tree_cls=CyberTree)
+
+
+@bot.check
+async def _global_role_check(ctx: commands.Context) -> bool:
+    """Verifica el rol requerido para todos los comandos de prefijo."""
+    if REQUIRED_ROLE_ID == 0:
+        return True
+    if ctx.guild is None:
+        return False
+    if ctx.author.guild_permissions.administrator:
+        return True
+    role = ctx.guild.get_role(REQUIRED_ROLE_ID)
+    return role is not None and role in ctx.author.roles
+
+
+@bot.event
+async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
+    if isinstance(error, commands.CheckFailure):
+        await ctx.send(embed=role_denied_embed(), delete_after=12)
+    elif isinstance(error, commands.MissingPermissions):
+        await ctx.send(
+            embed=error_embed("Necesitas permisos de **Administrador** para este comando."),
+            delete_after=12,
+        )
 
 
 @bot.event
@@ -665,6 +738,91 @@ async def on_ready() -> None:
             name=f"◈ ESP32-CAM @ {ESP32_IP}",
         )
     )
+
+
+# ── w!rol ────────────────────────────────────────────────────────────────────
+
+@bot.command(name="rol")
+@commands.has_permissions(administrator=True)
+@commands.guild_only()
+async def cmd_rol(ctx: commands.Context, *, arg: str = "") -> None:
+    """
+    Establece o elimina el rol requerido para usar el bot.
+
+    Uso:
+      w!rol @rol       — restringe el bot a ese rol
+      w!rol off        — elimina la restricción (todos pueden usarlo)
+      w!rol            — muestra la configuración actual
+    """
+    global REQUIRED_ROLE_ID
+
+    # Sin argumento → estado actual
+    if not arg:
+        if REQUIRED_ROLE_ID == 0:
+            desc = "> El bot está **abierto a todos** los miembros."
+        else:
+            desc = f"> 🎭 **Rol activo:** <@&{REQUIRED_ROLE_ID}>\n> Solo ese rol puede interactuar con el bot."
+        embed = discord.Embed(
+            title="🔐  ROL REQUERIDO  ·  Estado actual",
+            description=(
+                f"```ansi\n\u001b[1;35m◈ CONFIGURACIÓN DE ACCESO\u001b[0m\n```"
+                f"{desc}"
+            ),
+            color=CYBER_PURPLE,
+        )
+        embed.set_footer(text=_cyber_footer(f"Cambia con: {COMMAND_PREFIX}rol @rol  ·  {COMMAND_PREFIX}rol off"))
+        await ctx.send(embed=embed)
+        return
+
+    # Desactivar restricción
+    if arg.lower() in ("off", "none", "sin", "0", "libre", "todos"):
+        REQUIRED_ROLE_ID = 0
+        _save_env("REQUIRED_ROLE_ID", "0")
+        embed = discord.Embed(
+            title="🔓  ROL REQUERIDO  ·  Desactivado",
+            description=(
+                "```ansi\n\u001b[1;34m◈ RESTRICCIÓN ELIMINADA\u001b[0m\n```"
+                "> El bot ahora está **abierto a todos** los miembros del servidor."
+            ),
+            color=CYBER_BLUE,
+        )
+        embed.set_footer(text=_cyber_footer())
+        await ctx.send(embed=embed)
+        return
+
+    # Resolver el rol: mención, ID numérico o nombre exacto
+    role: discord.Role | None = None
+    if ctx.message.role_mentions:
+        role = ctx.message.role_mentions[0]
+    else:
+        try:
+            role = ctx.guild.get_role(int(arg))
+        except ValueError:
+            role = discord.utils.get(ctx.guild.roles, name=arg)
+
+    if role is None:
+        await ctx.send(
+            embed=error_embed(
+                f"No se encontró ningún rol con `{arg}`.\n"
+                "▸ Usa @mención, ID numérico o nombre exacto del rol."
+            )
+        )
+        return
+
+    REQUIRED_ROLE_ID = role.id
+    _save_env("REQUIRED_ROLE_ID", str(role.id))
+    embed = discord.Embed(
+        title="🔐  ROL REQUERIDO  ·  Actualizado",
+        description=(
+            f"```ansi\n\u001b[1;35m◈ ACCESO RESTRINGIDO\u001b[0m\n```"
+            f"> 🎭 **Rol activo:** {role.mention}\n"
+            f"> Solo los miembros con ese rol pueden usar el bot.\n"
+            f"> Los **Administradores** siempre tienen acceso completo."
+        ),
+        color=NEON_PURPLE,
+    )
+    embed.set_footer(text=_cyber_footer(f"ID del rol: {role.id}"))
+    await ctx.send(embed=embed)
 
 
 # ── /foto ─────────────────────────────────────────────────────────────────────

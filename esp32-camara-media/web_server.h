@@ -29,6 +29,9 @@ private:
     void handleViewPhoto();
     void handleDeletePhoto();
 
+    // Handler ventilador
+    void handleFan();
+
     // Handlers de rutas - gestión WiFi
     void handleGetWiFiNetworks();
     void handleAddWiFiNetwork();

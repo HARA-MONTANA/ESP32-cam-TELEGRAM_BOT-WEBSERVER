@@ -65,6 +65,13 @@
 #define FLASH_GPIO_NUM 4
 
 // ============================================
+// VENTILADOR / FAN
+// ============================================
+// Pin GPIO conectado al relé o MOSFET del ventilador.
+// Cambia este valor según tu hardware.
+#define FAN_GPIO_NUM 12
+
+// ============================================
 // INTERVALOS DE TIEMPO (en milisegundos)
 // ============================================
 #define TELEGRAM_CHECK_INTERVAL 1000   // Revisar mensajes cada 1 segundo

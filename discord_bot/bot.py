@@ -7,6 +7,7 @@ Comandos disponibles (/comando o w!comando):
   /foto_flash    — Captura con el flash LED encendido (GPIO4)
   /fotodiaria    — Envía la foto automática del día (busca en SD, o captura en vivo)
   /video [seg]   — Graba N segundos del stream y envía el .mp4 (máx. 30 s)
+  /sd            — Explora carpetas y descarga archivos de la SD (navegación por directorios)
   /estado        — Muestra RAM, WiFi, SD y uptime de la ESP32-CAM
   /help          — Muestra esta ayuda
 
@@ -82,11 +83,15 @@ def esp32_url(path: str = "") -> str:
 
 
 def capture_image(flash: bool = False) -> bytes | None:
-    """Captura un JPEG desde /capture. Activa el flash si se indica."""
-    if flash:
-        _set_flash("on")
+    """Captura un JPEG desde /capture.
+    Pasa ?flash=1/0 al endpoint para que active el LED sólo durante esa captura
+    sin modificar la configuración global del dashboard."""
     try:
-        r = requests.get(esp32_url("/capture"), timeout=REQUEST_TIMEOUT)
+        r = requests.get(
+            esp32_url("/capture"),
+            params={"flash": "1" if flash else "0"},
+            timeout=REQUEST_TIMEOUT,
+        )
         r.raise_for_status()
         if "image" in r.headers.get("content-type", ""):
             return r.content
@@ -95,16 +100,6 @@ def capture_image(flash: bool = False) -> bytes | None:
     except requests.RequestException as exc:
         log.error("Error capturando imagen: %s", exc)
         return None
-    finally:
-        if flash:
-            _set_flash("off")
-
-
-def _set_flash(state: str) -> None:
-    try:
-        requests.get(esp32_url(f"/flash?state={state}"), timeout=5)
-    except requests.RequestException:
-        pass
 
 
 def get_status() -> dict | None:
@@ -144,8 +139,32 @@ def get_daily_photo() -> tuple[bytes | None, str]:
     return capture_image(), fallback_name
 
 
+def list_sd_folders() -> list | None:
+    """Devuelve las carpetas de la SD desde /folders."""
+    try:
+        r = requests.get(esp32_url("/folders"), timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else []
+    except Exception as exc:
+        log.error("Error listando carpetas SD: %s", exc)
+        return None
+
+
+def list_folder_files(folder: str) -> list | None:
+    """Devuelve archivos de una carpeta específica de la SD."""
+    try:
+        r = requests.get(esp32_url("/photos"), params={"folder": folder}, timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else data.get("photos", [])
+    except Exception as exc:
+        log.error("Error listando archivos en '%s': %s", folder, exc)
+        return None
+
+
 def list_sd_files() -> list | None:
-    """Devuelve la lista de archivos en la SD desde /photos."""
+    """Devuelve la lista de archivos en la SD desde /photos (carpeta fotos_web por defecto)."""
     try:
         r = requests.get(esp32_url("/photos"), timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
@@ -156,14 +175,17 @@ def list_sd_files() -> list | None:
         return None
 
 
-def get_sd_file(name: str) -> bytes | None:
-    """Descarga un archivo específico de la SD por nombre/ruta."""
+def get_sd_file(name: str, folder: str = "") -> bytes | None:
+    """Descarga un archivo específico de la SD por nombre y carpeta."""
     try:
-        r = requests.get(esp32_url(f"/photo?name={name}"), timeout=REQUEST_TIMEOUT)
+        params: dict = {"name": name}
+        if folder:
+            params["folder"] = folder
+        r = requests.get(esp32_url("/photo"), params=params, timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
         return r.content
     except Exception as exc:
-        log.error("Error descargando archivo SD '%s': %s", name, exc)
+        log.error("Error descargando archivo SD '%s' de '%s': %s", name, folder, exc)
         return None
 
 
@@ -280,6 +302,81 @@ def _estado_embed(status: dict) -> discord.Embed:
 
 
 _SD_FILES_PER_PAGE = 20
+
+_FOLDER_ICONS: dict = {
+    "fotos_diarias":  "📅",
+    "fotos_telegram": "📱",
+    "fotos_web":      "🌐",
+}
+
+
+def _folder_icon(name: str) -> str:
+    return _FOLDER_ICONS.get(name, "📁")
+
+
+def _fs_root_embed(folders: list) -> discord.Embed:
+    """Embed raíz del explorador: lista de carpetas de la SD."""
+    if not folders:
+        desc = (
+            "```ansi\n\u001b[1;33m◈ SIN CARPETAS\u001b[0m\n```"
+            "> No hay carpetas en la tarjeta SD."
+        )
+    else:
+        lines = []
+        for f in folders:
+            name  = f.get("name", "?") if isinstance(f, dict) else str(f)
+            count = f.get("count", 0)  if isinstance(f, dict) else 0
+            icon  = _folder_icon(name)
+            lines.append(
+                f"> {icon} **`{name}`** — `{count}` foto{'s' if count != 1 else ''}"
+            )
+        desc = (
+            f"```ansi\n\u001b[1;35m◈ {len(folders)} CARPETA{'S' if len(folders) != 1 else ''}"
+            f" ENCONTRADA{'S' if len(folders) != 1 else ''}\u001b[0m\n```"
+            + "\n".join(lines)
+            + "\n\n> Selecciona una carpeta del menú para explorar sus archivos."
+        )
+    embed = discord.Embed(
+        title="💾  SD CARD FILESYSTEM  ·  ESP32-CAM",
+        description=desc,
+        color=CYBER_PURPLE,
+    )
+    embed.set_footer(text=_cyber_footer())
+    return embed
+
+
+def _sd_folder_embed(folder: str, files: list, page: int, total_pages: int) -> discord.Embed:
+    """Embed con los archivos de una carpeta concreta de la SD."""
+    icon  = _folder_icon(folder)
+    start = page * _SD_FILES_PER_PAGE
+    page_files = files[start:start + _SD_FILES_PER_PAGE]
+    lines = []
+    for i, f in enumerate(page_files, start=start + 1):
+        name = f.get("name", "") if isinstance(f, dict) else str(f)
+        size = f.get("size", 0)  if isinstance(f, dict) else 0
+        basename = name.rsplit("/", 1)[-1] or name
+        if basename.lower().endswith((".jpg", ".jpeg", ".png")):
+            ficon = "🖼️"
+        elif basename.lower().endswith((".mp4", ".avi", ".mov")):
+            ficon = "🎥"
+        else:
+            ficon = "📄"
+        size_str = f"`{size / 1024:.1f} KB`" if size else "`? KB`"
+        lines.append(f"`{i:02d}.` {ficon} `{basename}` — {size_str}")
+    desc_files = "\n".join(lines) if lines else "> *No hay archivos en esta carpeta*"
+    count = len(files)
+    embed = discord.Embed(
+        title=f"{icon}  {folder}  ·  ESP32-CAM",
+        description=(
+            f"```ansi\n\u001b[1;35m◈ {count} ARCHIVO{'S' if count != 1 else ''}"
+            f" ENCONTRADO{'S' if count != 1 else ''}\u001b[0m\n```"
+            f"{desc_files}"
+        ),
+        color=CYBER_PURPLE,
+    )
+    footer_extra = f"Página {page + 1} / {total_pages}" if total_pages > 1 else ""
+    embed.set_footer(text=_cyber_footer(footer_extra) if footer_extra else _cyber_footer())
+    return embed
 
 
 def _sd_embed(files: list, page: int, total_pages: int) -> discord.Embed:
@@ -588,55 +685,127 @@ class EstadoView(discord.ui.View):
         await interaction.followup.send(embed=_estado_embed(status), view=EstadoView())
 
 
-# ── SD Card Views ────────────────────────────────────────────────────────────
+# ── SD Card / Filesystem Views ────────────────────────────────────────────────
 
-class FileSelectMenu(discord.ui.Select):
-    """Menú desplegable con los archivos de la página actual de la SD."""
+class FolderSelectMenu(discord.ui.Select):
+    """Menú desplegable para elegir una carpeta de la SD."""
 
-    def __init__(self, files_page: list):
+    def __init__(self, folders: list):
+        self._folders = folders
+        options = []
+        for f in folders:
+            name  = f.get("name", "?") if isinstance(f, dict) else str(f)
+            count = f.get("count", 0)  if isinstance(f, dict) else 0
+            icon  = _folder_icon(name)
+            options.append(discord.SelectOption(
+                label=name[:100],
+                value=name[:100],
+                description=f"{count} archivo{'s' if count != 1 else ''}",
+                emoji=icon,
+            ))
+        super().__init__(
+            placeholder="📁 Selecciona una carpeta para explorar...",
+            options=options or [discord.SelectOption(label="(sin carpetas)", value="_empty")],
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        folder_name = self.values[0]
+        if folder_name == "_empty":
+            await interaction.response.defer()
+            return
+        await interaction.response.defer()
+        loop = asyncio.get_running_loop()
+        files = await loop.run_in_executor(None, list_folder_files, folder_name)
+        if files is None:
+            await interaction.followup.send(embed=connection_error_embed(), ephemeral=True)
+            return
+        if not files:
+            empty_embed = discord.Embed(
+                title=f"{_folder_icon(folder_name)}  {folder_name}  ·  Vacía",
+                description=(
+                    "```ansi\n\u001b[1;33m◈ SIN ARCHIVOS\u001b[0m\n```"
+                    "> No hay archivos en esta carpeta."
+                ),
+                color=CYBER_PURPLE,
+            )
+            empty_embed.set_footer(text=_cyber_footer())
+            await interaction.message.edit(
+                embed=empty_embed,
+                view=_back_to_root_view(self._folders),
+            )
+            return
+        total_pages = max(1, (len(files) + _SD_FILES_PER_PAGE - 1) // _SD_FILES_PER_PAGE)
+        await interaction.message.edit(
+            embed=_sd_folder_embed(folder_name, files, 0, total_pages),
+            view=SDFolderView(folder_name, files, self._folders),
+        )
+
+
+class FSRootView(discord.ui.View):
+    """Vista raíz del explorador de archivos SD: muestra el menú de carpetas."""
+
+    def __init__(self, folders: list):
+        super().__init__(timeout=180)
+        self._folders = folders
+        if folders:
+            self.add_item(FolderSelectMenu(folders))
+
+
+def _back_to_root_view(folders: list) -> "FSRootView":
+    """Devuelve un FSRootView con botón de volver, reutilizando la lista de carpetas."""
+    view = FSRootView(folders)
+    return view
+
+
+class SDFolderFileMenu(discord.ui.Select):
+    """Menú desplegable con los archivos de la página actual de una carpeta."""
+
+    def __init__(self, folder: str, files_page: list):
+        self._folder = folder
         options = []
         for f in files_page:
             name = f.get("name", "") if isinstance(f, dict) else str(f)
-            size = f.get("size", 0) if isinstance(f, dict) else 0
+            size = f.get("size", 0)  if isinstance(f, dict) else 0
             basename = name.rsplit("/", 1)[-1] or name
             if basename.lower().endswith((".jpg", ".jpeg", ".png")):
-                icon = "🖼️"
+                ficon = "🖼️"
             elif basename.lower().endswith((".mp4", ".avi", ".mov")):
-                icon = "🎥"
+                ficon = "🎥"
             else:
-                icon = "📄"
+                ficon = "📄"
             label = basename[:100] or "archivo"
             desc  = f"{size / 1024:.1f} KB" if size else None
             options.append(discord.SelectOption(
                 label=label,
-                value=name[:100],
+                value=basename[:100],
                 description=desc,
-                emoji=icon,
+                emoji=ficon,
             ))
         super().__init__(
-            placeholder="📂 Selecciona un archivo para enviarlo...",
+            placeholder="📄 Selecciona un archivo para descargarlo...",
             options=options,
             min_values=1,
             max_values=1,
         )
 
     async def callback(self, interaction: discord.Interaction):
-        name = self.values[0]
+        basename = self.values[0]
         await interaction.response.defer()
         loop = asyncio.get_running_loop()
-        data = await loop.run_in_executor(None, get_sd_file, name)
+        data = await loop.run_in_executor(None, get_sd_file, basename, self._folder)
         if data is None:
             await interaction.followup.send(
-                embed=error_embed(f"No se pudo descargar `{name}` de la SD."),
+                embed=error_embed(f"No se pudo descargar `{basename}` de `{self._folder}`."),
                 ephemeral=True,
             )
             return
-        basename = name.rsplit("/", 1)[-1] or name
         embed = discord.Embed(
-            title=f"💾  SD FILE  ·  {basename}",
+            title=f"💾  {basename}",
             description=(
-                f"```ansi\n\u001b[1;35m◈ ARCHIVO ENVIADO\u001b[0m\n```"
-                f"> 📂 **Ruta:** `{name}`\n"
+                f"```ansi\n\u001b[1;35m◈ ARCHIVO DESCARGADO\u001b[0m\n```"
+                f"> {_folder_icon(self._folder)} **Carpeta:** `{self._folder}`\n"
                 f"> 💿 **Tamaño:** `{len(data) / 1024:.1f} KB`"
             ),
             color=CYBER_PURPLE,
@@ -650,8 +819,77 @@ class FileSelectMenu(discord.ui.Select):
         )
 
 
+class SDFolderView(discord.ui.View):
+    """Vista paginada de archivos dentro de una carpeta, con navegación y botón de volver."""
+
+    def __init__(self, folder: str, files: list, root_folders: list, page: int = 0):
+        super().__init__(timeout=180)
+        self.folder       = folder
+        self.files        = files
+        self.root_folders = root_folders
+        self.page         = page
+        self.total_pages  = max(1, (len(files) + _SD_FILES_PER_PAGE - 1) // _SD_FILES_PER_PAGE)
+        self._rebuild()
+
+    def _page_slice(self) -> list:
+        start = self.page * _SD_FILES_PER_PAGE
+        return self.files[start:start + _SD_FILES_PER_PAGE]
+
+    def _rebuild(self):
+        self.clear_items()
+        page_files = self._page_slice()
+        if page_files:
+            self.add_item(SDFolderFileMenu(self.folder, page_files))
+        # Fila de navegación
+        if self.page > 0:
+            prev = discord.ui.Button(
+                label=f"◀  Pág. {self.page}",
+                style=discord.ButtonStyle.secondary,
+                row=1,
+            )
+            prev.callback = self._go_prev
+            self.add_item(prev)
+        back_btn = discord.ui.Button(
+            label="📁  Carpetas",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        back_btn.callback = self._go_root
+        self.add_item(back_btn)
+        if self.page < self.total_pages - 1:
+            nxt = discord.ui.Button(
+                label=f"Pág. {self.page + 2}  ▶",
+                style=discord.ButtonStyle.secondary,
+                row=1,
+            )
+            nxt.callback = self._go_next
+            self.add_item(nxt)
+
+    async def _go_prev(self, interaction: discord.Interaction):
+        self.page -= 1
+        self._rebuild()
+        await interaction.response.edit_message(
+            embed=_sd_folder_embed(self.folder, self.files, self.page, self.total_pages),
+            view=self,
+        )
+
+    async def _go_next(self, interaction: discord.Interaction):
+        self.page += 1
+        self._rebuild()
+        await interaction.response.edit_message(
+            embed=_sd_folder_embed(self.folder, self.files, self.page, self.total_pages),
+            view=self,
+        )
+
+    async def _go_root(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(
+            embed=_fs_root_embed(self.root_folders),
+            view=FSRootView(self.root_folders),
+        )
+
+
 class SDView(discord.ui.View):
-    """Vista paginada para explorar archivos de la SD."""
+    """Vista paginada para explorar archivos de la SD (compatibilidad interna)."""
 
     def __init__(self, files: list, page: int = 0):
         super().__init__(timeout=180)
@@ -668,7 +906,7 @@ class SDView(discord.ui.View):
         self.clear_items()
         page_files = self._page_slice()
         if page_files:
-            self.add_item(FileSelectMenu(page_files))
+            self.add_item(SDFolderFileMenu("", page_files))
         if self.page > 0:
             prev = discord.ui.Button(
                 label=f"◀  Pág. {self.page}",
@@ -985,27 +1223,14 @@ async def cmd_estado(ctx: commands.Context) -> None:
 
 # ── /sd ──────────────────────────────────────────────────────────────────────
 
-@bot.hybrid_command(name="sd", description="💾 Explora y descarga archivos guardados en la tarjeta SD")
+@bot.hybrid_command(name="sd", description="💾 Explora el sistema de archivos de la SD y descarga fotos")
 async def cmd_sd(ctx: commands.Context) -> None:
     await ctx.defer()
-    files = list_sd_files()
-    if files is None:
+    folders = list_sd_folders()
+    if folders is None:
         await ctx.send(embed=connection_error_embed())
         return
-    if not files:
-        empty = discord.Embed(
-            title="💾  SD CARD  ·  Vacía",
-            description=(
-                "```ansi\n\u001b[1;33m◈ SIN ARCHIVOS\u001b[0m\n```"
-                "> No hay archivos guardados en la tarjeta SD."
-            ),
-            color=CYBER_PURPLE,
-        )
-        empty.set_footer(text=_cyber_footer())
-        await ctx.send(embed=empty)
-        return
-    total_pages = max(1, (len(files) + _SD_FILES_PER_PAGE - 1) // _SD_FILES_PER_PAGE)
-    await ctx.send(embed=_sd_embed(files, 0, total_pages), view=SDView(files))
+    await ctx.send(embed=_fs_root_embed(folders), view=FSRootView(folders))
 
 
 # ── /help ─────────────────────────────────────────────────────────────────────
@@ -1032,7 +1257,7 @@ async def cmd_help(ctx: commands.Context) -> None:
         ("⚡  `/foto_flash`",        "Captura con el flash LED encendido"),
         ("📅  `/fotodiaria`",        "Foto automática del día *(SD o captura en vivo)*"),
         ("🎥  `/video [segundos]`",  "Graba y envía un video *(máx. 30 seg)*"),
-        ("💾  `/sd`",               "Explora y descarga archivos de la tarjeta SD"),
+        ("💾  `/sd`",               "Explora carpetas y descarga archivos de la tarjeta SD"),
         ("📊  `/estado`",            "Estado del sistema: RAM, WiFi, uptime"),
         ("🔐  `/rol [@rol]`",        "*(Admin)* Establece el rol que puede usar el bot"),
         ("❓  `/help`",              "Muestra esta ayuda"),

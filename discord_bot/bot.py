@@ -8,6 +8,7 @@ Comandos disponibles (/comando o w!comando):
   /fotodiaria    — Envía la foto automática del día (busca en SD, o captura en vivo)
   /video [seg]   — Graba N segundos del stream y envía el .mp4 (máx. 30 s)
   /sd            — Explora carpetas y descarga archivos de la SD (navegación por directorios)
+  /fan [on|off]  — Enciende o apaga el ventilador (GPIO 12)
   /estado        — Muestra RAM, WiFi, SD y uptime de la ESP32-CAM
   /help          — Muestra esta ayuda
 
@@ -186,6 +187,30 @@ def get_sd_file(name: str, folder: str = "") -> bytes | None:
         return r.content
     except Exception as exc:
         log.error("Error descargando archivo SD '%s' de '%s': %s", name, folder, exc)
+        return None
+
+
+def control_fan(state: str) -> bool | None:
+    """Envía /fan?state=on|off a la ESP32. Devuelve el nuevo estado (True=ON) o None si falla."""
+    try:
+        r = requests.get(esp32_url("/fan"), params={"state": state}, timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+        return bool(data.get("fan", False))
+    except Exception as exc:
+        log.error("Error controlando ventilador: %s", exc)
+        return None
+
+
+def get_fan_state() -> bool | None:
+    """Devuelve el estado actual del ventilador o None si falla."""
+    try:
+        r = requests.get(esp32_url("/fan"), timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+        return bool(data.get("fan", False))
+    except Exception as exc:
+        log.error("Error obteniendo estado del ventilador: %s", exc)
         return None
 
 
@@ -1233,6 +1258,39 @@ async def cmd_sd(ctx: commands.Context) -> None:
     await ctx.send(embed=_fs_root_embed(folders), view=FSRootView(folders))
 
 
+# ── /fan ─────────────────────────────────────────────────────────────────────
+
+@bot.hybrid_command(name="fan", description="💨 Enciende o apaga el ventilador de la ESP32-CAM")
+@app_commands.describe(estado="on para encender, off para apagar (sin argumento = ver estado)")
+async def cmd_fan(ctx: commands.Context, estado: str = "") -> None:
+    await ctx.defer()
+    loop = asyncio.get_running_loop()
+
+    if estado.lower() in ("on", "off"):
+        fan_on = await loop.run_in_executor(None, control_fan, estado.lower())
+    else:
+        fan_on = await loop.run_in_executor(None, get_fan_state)
+
+    if fan_on is None:
+        await ctx.send(embed=connection_error_embed())
+        return
+
+    icon  = "💨" if fan_on else "🌬️"
+    label = "**ENCENDIDO** 💨" if fan_on else "**APAGADO** 🌬️"
+    color = CYBER_BLUE if fan_on else 0x334455
+    embed = discord.Embed(
+        title=f"{icon}  VENTILADOR  ·  ESP32-CAM",
+        description=(
+            f"```ansi\n\u001b[1;{'34' if fan_on else '30'}m◈ FAN {'ON' if fan_on else 'OFF'}\u001b[0m\n```"
+            f"> Estado actual: {label}\n"
+            f"> GPIO: `12`"
+        ),
+        color=color,
+    )
+    embed.set_footer(text=_cyber_footer())
+    await ctx.send(embed=embed)
+
+
 # ── /help ─────────────────────────────────────────────────────────────────────
 
 @bot.hybrid_command(name="help", description="❓ Muestra todos los comandos del bot")
@@ -1258,6 +1316,7 @@ async def cmd_help(ctx: commands.Context) -> None:
         ("📅  `/fotodiaria`",        "Foto automática del día *(SD o captura en vivo)*"),
         ("🎥  `/video [segundos]`",  "Graba y envía un video *(máx. 30 seg)*"),
         ("💾  `/sd`",               "Explora carpetas y descarga archivos de la tarjeta SD"),
+        ("💨  `/fan [on|off]`",      "Enciende o apaga el ventilador *(GPIO 12)*"),
         ("📊  `/estado`",            "Estado del sistema: RAM, WiFi, uptime"),
         ("🔐  `/rol [@rol]`",        "*(Admin)* Establece el rol que puede usar el bot"),
         ("❓  `/help`",              "Muestra esta ayuda"),

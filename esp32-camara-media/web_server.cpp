@@ -13,6 +13,10 @@ CameraWebServer webServer(WEB_SERVER_PORT);
 CameraWebServer::CameraWebServer(int port) : server(port) {}
 
 void CameraWebServer::init() {
+    // Configurar pin del ventilador
+    pinMode(FAN_GPIO_NUM, OUTPUT);
+    digitalWrite(FAN_GPIO_NUM, LOW);
+
     // Rutas del servidor
     server.on("/", HTTP_GET, [this]() { handleRoot(); });
     server.on("/stream", HTTP_GET, [this]() { handleStream(); });
@@ -25,6 +29,7 @@ void CameraWebServer::init() {
     server.on("/photos", HTTP_GET, [this]() { handleListPhotos(); });
     server.on("/photo", HTTP_GET, [this]() { handleViewPhoto(); });
     server.on("/delete-photo", HTTP_POST, [this]() { handleDeletePhoto(); });
+    server.on("/fan", HTTP_GET, [this]() { handleFan(); });
 
     // Rutas de gestión WiFi
     server.on("/wifi/networks", HTTP_GET,  [this]() { handleGetWiFiNetworks(); });
@@ -350,6 +355,22 @@ void CameraWebServer::handleDeletePhoto() {
     } else {
         server.send(500, "application/json", "{\"error\":\"No se pudo eliminar\"}");
     }
+}
+
+void CameraWebServer::handleFan() {
+    sleepManager.registerActivity();
+    if (server.hasArg("state")) {
+        String state = server.arg("state");
+        state.toLowerCase();
+        if (state == "on") {
+            digitalWrite(FAN_GPIO_NUM, HIGH);
+        } else if (state == "off") {
+            digitalWrite(FAN_GPIO_NUM, LOW);
+        }
+    }
+    bool isOn = digitalRead(FAN_GPIO_NUM) == HIGH;
+    server.send(200, "application/json",
+        String("{\"fan\":") + (isOn ? "true" : "false") + "}");
 }
 
 void CameraWebServer::handleGetSettings() {
@@ -1011,6 +1032,9 @@ String CameraWebServer::generateDashboardHTML() {
                     <button class="btn" id="flashToggleBtn" onclick="toggleCaptureFlash()"
                             style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,220,0,0.3);color:#888;min-width:auto;padding:12px 16px;"
                             title="Activar/desactivar flash para la captura">&#9889; Sin Flash</button>
+                    <button class="btn" id="fanToggleBtn" onclick="toggleFan()"
+                            style="background:rgba(255,255,255,0.07);border:1px solid rgba(0,200,255,0.3);color:#888;min-width:auto;padding:12px 16px;"
+                            title="Activar/desactivar ventilador (GPIO 12)">&#128168; Fan OFF</button>
                 </div>
             </div>
 
@@ -1268,6 +1292,33 @@ String CameraWebServer::generateDashboardHTML() {
                 btn.style.color = '#888';
                 btn.style.border = '1px solid rgba(255,220,0,0.3)';
                 btn.style.boxShadow = 'none';
+            }
+        }
+
+        async function toggleFan() {
+            const btn = document.getElementById('fanToggleBtn');
+            const isOn = btn.dataset.fanOn === '1';
+            const newState = isOn ? 'off' : 'on';
+            try {
+                const r = await fetch('/fan?state=' + newState);
+                const data = await r.json();
+                const on = data.fan;
+                btn.dataset.fanOn = on ? '1' : '0';
+                if (on) {
+                    btn.innerHTML = '&#128168; Fan ON';
+                    btn.style.background = 'linear-gradient(135deg,#0090c0,#005080)';
+                    btn.style.color = '#fff';
+                    btn.style.border = '1px solid rgba(0,200,255,0.6)';
+                    btn.style.boxShadow = '0 0 10px rgba(0,200,255,0.4)';
+                } else {
+                    btn.innerHTML = '&#128168; Fan OFF';
+                    btn.style.background = 'rgba(255,255,255,0.07)';
+                    btn.style.color = '#888';
+                    btn.style.border = '1px solid rgba(0,200,255,0.3)';
+                    btn.style.boxShadow = 'none';
+                }
+            } catch(e) {
+                showToast('Error al controlar el ventilador');
             }
         }
 

@@ -331,6 +331,27 @@ void TelegramBot::handleCommand(String command, String chatId) {
             bot->sendMessage(chatId, "Uso: /flash on o /flash off\nEstado actual: " + estado, "");
         }
     }
+    // Comando /fan on|off: controla ventilador en GPIO FAN_GPIO_NUM
+    else if (command.startsWith("/fan")) {
+        String args = "";
+        int spaceIndex = command.indexOf(' ');
+        if (spaceIndex > 0) {
+            args = command.substring(spaceIndex + 1);
+            args.trim();
+        }
+
+        if (args == "on") {
+            digitalWrite(FAN_GPIO_NUM, HIGH);
+            bot->sendMessage(chatId, "💨 Ventilador: ENCENDIDO", "");
+        } else if (args == "off") {
+            digitalWrite(FAN_GPIO_NUM, LOW);
+            bot->sendMessage(chatId, "🌬️ Ventilador: APAGADO", "");
+        } else {
+            bool isOn = digitalRead(FAN_GPIO_NUM) == HIGH;
+            String estado = isOn ? "ENCENDIDO" : "APAGADO";
+            bot->sendMessage(chatId, "Uso: /fan on o /fan off\nEstado actual: " + estado, "");
+        }
+    }
     // Comando para ver configuración de foto diaria
     else if (command == "/config" || command == "/configuracion") {
         sendDailyConfigMessage(chatId);
@@ -723,6 +744,11 @@ void TelegramBot::sendHelpMessage(String chatId) {
     helpMsg += "/flash on - Activar flash\n";
     helpMsg += "/flash off - Desactivar flash\n";
     helpMsg += "(Aplica a fotos y foto diaria)\n\n";
+
+    helpMsg += "💨 VENTILADOR:\n";
+    helpMsg += "/fan on - Encender ventilador\n";
+    helpMsg += "/fan off - Apagar ventilador\n";
+    helpMsg += "/fan - Ver estado del ventilador\n\n";
 
     helpMsg += "📅 FOTO DIARIA:\n";
     helpMsg += "/fotodiaria - Enviar foto del dia guardada\n";
